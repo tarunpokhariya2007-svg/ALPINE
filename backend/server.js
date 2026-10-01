@@ -6,6 +6,7 @@ process.env.TZ = "Asia/Kolkata";
 require("dotenv").config();
 
 const express = require("express");
+const feedbackRoutes = require("./routes/feedbackRoutes");
 const cors = require("cors");
 const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
@@ -47,10 +48,19 @@ const { ensureOtpTable } = require("./database/otpModel");
 const { ensureGoogleAuthSupport } = require("./database/userModel");
 const { ensureRefreshTokenTable } = require("./database/refreshTokenModel");
 const { ensurePasswordResetTokenTable } = require("./database/passwordResetTokenModel");
+
 const {
     ensureDocumentHashColumn,
     ensureBlockchainColumns,
 } = require("./database/documentHashModel");
+
+// =====================================================
+// AUDIT LOG INITIALIZATION
+// =====================================================
+
+const {
+    ensureAuditLogsTable,
+} = require("./database/auditLogModel");
 
 ensureOtpTable().catch((err) => {
     console.error(
@@ -94,6 +104,13 @@ ensureBlockchainColumns().catch((err) => {
     );
 });
 
+ensureAuditLogsTable().catch((err) => {
+    console.error(
+        "Failed to ensure audit_logs table:",
+        err.message
+    );
+});
+
 // =====================================================
 // ROUTES
 // =====================================================
@@ -101,6 +118,8 @@ ensureBlockchainColumns().catch((err) => {
 const uploadRoutes = require("./routes/uploadRoutes");
 const documentSecurityRoutes = require("./routes/documentSecurityRoutes");
 const authRoutes = require("./routes/authRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const managementRoutes = require("./routes/managementRoutes");
 const lawyerRoutes = require("./routes/lawyerRoutes");
 const voiceRoutes = require("./routes/voiceRoutes");
 const chatRoutes = require("./routes/chatRoutes");
@@ -127,14 +146,16 @@ const { createNotification } = require("./routes/notificationRoutes");
 // =====================================================
 
 const app = express();
+
 // Render runs the application behind a trusted reverse proxy.
 // This allows express-rate-limit to safely process X-Forwarded-For.
 
 app.set("trust proxy", 1);
+
 // =====================================================
 // SECURITY HEADERS - HELMET
 // =====================================================
-    
+
 app.use(
     helmet({
         crossOriginResourcePolicy: {
@@ -165,6 +186,7 @@ const allowedOrigins = [
 
 // Localhost origins are only needed for local development
 // and must never be trusted in production.
+
 if (!isProduction) {
     allowedOrigins.push(
         "http://localhost:5173",
@@ -175,8 +197,10 @@ if (!isProduction) {
 app.use(
     cors({
         origin: function (origin, callback) {
+
             // Allow requests without an Origin header.
             // This includes server-to-server requests and some CLI tools.
+
             if (!origin) {
                 return callback(null, true);
             }
@@ -220,6 +244,7 @@ app.use(
 // =====================================================
 
 // Limit JSON payload size to reduce abuse / DoS risk.
+
 app.use(
     express.json({
         limit: "1mb",
@@ -278,7 +303,17 @@ const apiLimiter = rateLimit({
 });
 
 // Apply general limiter to API routes.
+
 app.use("/api", apiLimiter);
+
+// -----------------------------------------------------
+// Feedback
+// -----------------------------------------------------
+
+app.use(
+    "/api/feedback",
+    feedbackRoutes
+);
 
 // =====================================================
 // API ROUTES
@@ -304,7 +339,26 @@ app.use(
 );
 
 // -----------------------------------------------------
-// Voice
+// Administrator Portal
+// -----------------------------------------------------
+
+app.use(
+    "/api/admin",
+    authLimiter,
+    adminRoutes
+);
+// -----------------------------------------------------
+// Management
+// -----------------------------------------------------
+
+app.use(
+    "/api/management",
+    authLimiter,
+    managementRoutes
+);
+
+// -----------------------------------------------------
+// VOICE
 // -----------------------------------------------------
 
 app.use(
@@ -401,6 +455,7 @@ app.use(
     "/api/signaling",
     signalingRoutes
 );
+
 // -----------------------------------------------------
 // Advocate AI Research
 // -----------------------------------------------------
@@ -409,6 +464,7 @@ app.use(
     "/api/research",
     researchRoutes
 );
+
 // -----------------------------------------------------
 // Global Content Search
 // -----------------------------------------------------
@@ -454,7 +510,9 @@ app.post(
     "/analyze",
     authMiddleware,
     async (req, res) => {
+
         try {
+
             console.log(
                 "================================="
             );
@@ -465,6 +523,7 @@ app.post(
 
             // Safe to log user ID.
             // Never log JWT tokens or passwords.
+
             console.log(
                 "USER ID:",
                 req.user.id
@@ -486,6 +545,7 @@ app.post(
             if (
                 result?.success === true
             ) {
+
                 await createNotification({
                     userId: req.user.id,
 
@@ -504,6 +564,7 @@ app.post(
             res.json(result);
 
         } catch (err) {
+
             console.error(
                 "ANALYZE ERROR:",
                 err.message
@@ -528,6 +589,7 @@ app.post(
 
 app.use(
     (req, res) => {
+
         res.status(404).json({
             success: false,
 
@@ -546,6 +608,7 @@ app.use(
 
 app.use(
     (err, req, res, next) => {
+
         console.error(
             "================================="
         );
@@ -597,6 +660,7 @@ const io =
         {
             cors: {
                 origin: function (origin, callback) {
+
                     if (!origin) {
                         return callback(null, true);
                     }
@@ -627,23 +691,32 @@ const io =
         }
     );
 
+// Make Socket.IO available to Express route handlers so meeting lifecycle
+// APIs can notify the participant who is currently in the consultation.
+
+app.set("io", io);
+
 // =====================================================
 // SOCKET.IO AUTHENTICATION
 // =====================================================
 
 io.use(
     (socket, next) => {
+
         try {
+
             // Preferred: HttpOnly auth cookie, sent automatically
             // by the browser when the Socket.IO client connects
             // with `withCredentials: true`. This keeps the JWT
             // out of frontend JavaScript entirely.
+
             let token = null;
 
             const cookieHeader =
                 socket.handshake.headers?.cookie;
 
             if (cookieHeader) {
+
                 const parsedCookies =
                     cookie.parse(cookieHeader);
 
@@ -653,6 +726,7 @@ io.use(
             }
 
             if (!token) {
+
                 console.error(
                     "Socket connection rejected: no token"
                 );
@@ -671,6 +745,7 @@ io.use(
                 );
 
             if (!decoded?.id) {
+
                 console.error(
                     "Socket connection rejected: invalid user"
                 );
@@ -683,6 +758,7 @@ io.use(
             }
 
             // Store only verified JWT data.
+
             socket.user = decoded;
 
             console.log(
@@ -694,6 +770,7 @@ io.use(
             next();
 
         } catch (error) {
+
             console.error(
                 "Socket authentication failed:",
                 error.message
@@ -722,6 +799,7 @@ const socketRooms =
 io.on(
     "connection",
     (socket) => {
+
         console.log(
             "WebRTC signaling client connected:",
             socket.id
@@ -734,15 +812,19 @@ io.on(
         socket.on(
             "join-consultation",
             async (data) => {
+
                 try {
+
                     // Only appointmentId comes from
                     // the browser.
+
                     const {
                         appointmentId,
                     } = data || {};
 
                     // User identity comes ONLY from
                     // the verified JWT.
+
                     const userId =
                         socket.user?.id;
 
@@ -756,6 +838,7 @@ io.on(
                     // -----------------------------------------
 
                     if (!appointmentId) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -768,6 +851,7 @@ io.on(
                     }
 
                     if (!userId || !role) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -788,6 +872,7 @@ io.on(
                         ) ||
                         numericAppointmentId <= 0
                     ) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -825,6 +910,7 @@ io.on(
                     if (
                         appointmentRows.length === 0
                     ) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -848,6 +934,7 @@ io.on(
                             appointment.status
                         ).toLowerCase() !== "confirmed"
                     ) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -881,6 +968,7 @@ io.on(
                     if (
                         consultationMode !== "video"
                     ) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -910,6 +998,7 @@ io.on(
                         !isCitizen &&
                         !isAdvocate
                     ) {
+
                         console.warn(
                             "Unauthorized consultation access:",
                             {
@@ -942,6 +1031,7 @@ io.on(
                         isCitizen &&
                         role !== "citizen"
                     ) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -957,6 +1047,7 @@ io.on(
                         isAdvocate &&
                         role !== "lawyer"
                     ) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -975,6 +1066,7 @@ io.on(
                     if (
                         socket.data.roomName
                     ) {
+
                         removeSocketFromConsultation(
                             socket
                         );
@@ -1016,6 +1108,7 @@ io.on(
                             roomName
                         )
                     ) {
+
                         socketRooms.set(
                             roomName,
                             new Map()
@@ -1101,6 +1194,7 @@ io.on(
                     );
 
                 } catch (error) {
+
                     console.error(
                         "Join consultation authorization error:",
                         error.message
@@ -1124,11 +1218,14 @@ io.on(
         socket.on(
             "webrtc-offer",
             (data) => {
+
                 try {
+
                     const roomName =
                         socket.data.roomName;
 
                     if (!roomName) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -1160,6 +1257,7 @@ io.on(
                     );
 
                 } catch (error) {
+
                     console.error(
                         "WebRTC offer error:",
                         error.message
@@ -1175,11 +1273,14 @@ io.on(
         socket.on(
             "webrtc-answer",
             (data) => {
+
                 try {
+
                     const roomName =
                         socket.data.roomName;
 
                     if (!roomName) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -1211,6 +1312,7 @@ io.on(
                     );
 
                 } catch (error) {
+
                     console.error(
                         "WebRTC answer error:",
                         error.message
@@ -1226,11 +1328,14 @@ io.on(
         socket.on(
             "webrtc-ice-candidate",
             (data) => {
+
                 try {
+
                     const roomName =
                         socket.data.roomName;
 
                     if (!roomName) {
+
                         socket.emit(
                             "signaling-error",
                             {
@@ -1262,6 +1367,7 @@ io.on(
                     );
 
                 } catch (error) {
+
                     console.error(
                         "ICE candidate error:",
                         error.message
@@ -1277,6 +1383,7 @@ io.on(
         socket.on(
             "leave-consultation",
             () => {
+
                 removeSocketFromConsultation(
                     socket
                 );
@@ -1290,6 +1397,7 @@ io.on(
         socket.on(
             "disconnect",
             (reason) => {
+
                 removeSocketFromConsultation(
                     socket
                 );
@@ -1311,6 +1419,7 @@ io.on(
 function removeSocketFromConsultation(
     socket
 ) {
+
     const roomName =
         socket.data?.roomName;
 
@@ -1324,6 +1433,7 @@ function removeSocketFromConsultation(
         );
 
     if (participants) {
+
         participants.delete(
             socket.id
         );
@@ -1341,6 +1451,7 @@ function removeSocketFromConsultation(
         if (
             participants.size === 0
         ) {
+
             socketRooms.delete(
                 roomName
             );
@@ -1374,7 +1485,9 @@ function removeSocketFromConsultation(
 
 server.listen(
     PORT,
+    "0.0.0.0",
     () => {
+
         console.log(
             "================================="
         );
@@ -1388,13 +1501,12 @@ server.listen(
         );
 
         console.log(
-            `Server running on http://localhost:${PORT}`
+            `Server running on http://0.0.0.0:${PORT}`
         );
 
         console.log(
             `Frontend origin: ${FRONTEND_URL}`
         );
-
 
         console.log(
             `Auth API: http://localhost:${PORT}/api/auth`
@@ -1435,9 +1547,11 @@ server.listen(
         console.log(
             `Signaling API: http://localhost:${PORT}/api/signaling`
         );
-console.log(
-    `Research API: http://localhost:${PORT}/api/research`
-);
+
+        console.log(
+            `Research API: http://localhost:${PORT}/api/research`
+        );
+
         console.log(
             `Socket.IO: http://localhost:${PORT}`
         );

@@ -1,11 +1,8 @@
 const mysql = require("mysql2/promise");
-
-console.log("DATABASE CONNECTION:");
-
-console.log("HOST:", process.env.DB_HOST);
-console.log("PORT:", process.env.DB_PORT);
-console.log("USER:", process.env.DB_USER);
-console.log("DATABASE:", process.env.DB_NAME);
+const {
+    ensureAuditLogsTable
+} = require("./database/auditLogModel");
+console.log("Database connection initialized.");
 
 const pool = mysql.createPool({
     host: process.env.DB_HOST,
@@ -175,6 +172,54 @@ async function initializeConsultationMeetingsTable() {
 
 
 // =====================================================
+// CREATE MEETING END REQUESTS TABLE
+// =====================================================
+
+async function initializeMeetingEndRequestsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS meeting_end_requests (
+                id INT NOT NULL AUTO_INCREMENT,
+                appointment_id INT NOT NULL,
+                requested_by INT NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                requested_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                resolved_by INT DEFAULT NULL,
+                resolved_at TIMESTAMP NULL DEFAULT NULL,
+
+                PRIMARY KEY (id),
+
+                UNIQUE KEY uq_meeting_end_request_appointment (appointment_id),
+                INDEX idx_meeting_end_request_status (status),
+                INDEX idx_meeting_end_request_requested_by (requested_by),
+
+                CONSTRAINT fk_meeting_end_request_appointment
+                    FOREIGN KEY (appointment_id)
+                    REFERENCES appointments(id)
+                    ON DELETE CASCADE,
+
+                CONSTRAINT fk_meeting_end_request_requested_by
+                    FOREIGN KEY (requested_by)
+                    REFERENCES users(id)
+                    ON DELETE CASCADE,
+
+                CONSTRAINT fk_meeting_end_request_resolved_by
+                    FOREIGN KEY (resolved_by)
+                    REFERENCES users(id)
+                    ON DELETE SET NULL
+            )
+        `);
+
+        console.log("MEETING END REQUESTS TABLE READY");
+    } catch (error) {
+        console.error(
+            "FAILED TO CREATE MEETING END REQUESTS TABLE:",
+            error.message
+        );
+    }
+}
+
+// =====================================================
 // INITIALIZE DATABASE TABLES
 // =====================================================
 
@@ -182,6 +227,7 @@ async function initializeDatabaseTables() {
     await initializeNotificationsTable();
     await initializeAppointmentsTable();
     await initializeConsultationMeetingsTable();
+    await initializeMeetingEndRequestsTable();
 }
 
 initializeDatabaseTables();

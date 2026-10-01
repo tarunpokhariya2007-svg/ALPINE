@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Outlet, Link, useLocation, useNavigate } from 'react-router'
+import MandatoryFeedbackGate from "../MandatoryFeedbackGate";
 import {
   LayoutDashboard,
   MessageSquare,
@@ -212,6 +213,11 @@ export default function DashboardLayout() {
   */
 
   const [search, setSearch] = useState('')
+
+  // Keep the search field read-only until the user explicitly focuses it.
+  // This prevents Chrome/password-manager autofill from injecting an
+  // email address into the global search field.
+  const [searchFocused, setSearchFocused] = useState(false)
 
   const [searchResults, setSearchResults] =
     useState<SearchResult[]>([])
@@ -1490,6 +1496,9 @@ export default function DashboardLayout() {
                 searchInputRef
               }
               className="input"
+              type="search"
+              autoComplete="off"
+              readOnly={!searchFocused}
               value={search}
               onChange={(
                 event,
@@ -1502,7 +1511,19 @@ export default function DashboardLayout() {
                   true,
                 )
               }}
-              onFocus={() => {
+              onFocus={(event) => {
+                // Clear any value that the browser may have injected
+                // before React received focus.
+                if (
+                  !search &&
+                  event.currentTarget.value
+                ) {
+                  event.currentTarget.value = ''
+                  setSearch('')
+                }
+
+                setSearchFocused(true)
+
                 if (
                   search.trim()
                     .length >= 2
@@ -1512,6 +1533,10 @@ export default function DashboardLayout() {
                   )
                 }
               }}
+              onBlur={() => {
+                // Return to read-only mode when the user leaves the field.
+                setSearchFocused(false)
+              }}
               onKeyDown={
                 handleSearchKeyDown
               }
@@ -1520,10 +1545,13 @@ export default function DashboardLayout() {
                   ? 'Search clients, cases, research...'
                   : 'Search cases, AI Assistant, documents...'
               }
-              autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
+              data-form-type="other"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              aria-label="Global search"
               style={{
                 paddingLeft: 32,
                 paddingRight: 34,
@@ -2045,7 +2073,9 @@ export default function DashboardLayout() {
             <BackButton />
           </div>
 
-          <Outlet />
+          <MandatoryFeedbackGate>
+            <Outlet />
+          </MandatoryFeedbackGate>
         </main>
       </div>
 
