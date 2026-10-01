@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { isLoggedIn } from '../lib/auth'
 import {
   Calendar,
   Clock,
@@ -10,7 +11,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 type Appointment = {
   id: number | string
@@ -22,10 +23,6 @@ type Appointment = {
   advocate_email?: string
   lawyer_name?: string
   full_name?: string
-}
-
-function getToken() {
-  return localStorage.getItem('token') || ''
 }
 
 function getStatus(appointment: Appointment) {
@@ -122,16 +119,14 @@ export default function YourBookings() {
       setLoading(true)
       setError('')
 
-      const token = getToken()
-
-      if (!token) {
+      if (!isLoggedIn()) {
         setError('Please login to view your bookings.')
         return
       }
 
       const response = await fetch(`${API_URL}/api/appointments`, {
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       })

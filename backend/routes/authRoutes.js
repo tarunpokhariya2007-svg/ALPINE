@@ -1,6 +1,6 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
-const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const db = require("../db");
 
 const authMiddleware = require("../middleware/authMiddleware");
@@ -27,7 +27,79 @@ const {
 const { fetchGoogleProfile } = require("../services/googleAuthService");
 const { sendPasswordResetOtpEmail } = require("../services/mailerService");
 
+const {
+    ACCESS_TOKEN_COOKIE,
+    REFRESH_TOKEN_COOKIE,
+    accessCookieOptions,
+    refreshCookieOptions,
+    clearCookieOptions
+} = require("../utils/cookieConfig");
+
+const {
+    CSRF_COOKIE,
+    issueCsrfCookie,
+    csrfClearCookieOptions
+} = require("../utils/csrf");
+
+const {
+    ACCESS_TOKEN_TTL_MS,
+    REFRESH_TOKEN_TTL_MS,
+    signAccessToken,
+    generateRefreshToken,
+    hashToken,
+    timingSafeEqualHex
+} = require("../utils/tokenService");
+
+const {
+    insertRefreshToken,
+    findRefreshTokenByHash,
+    revokeRefreshTokenByHash,
+    revokeAllTokensForUser
+} = require("../database/refreshTokenModel");
+
+const {
+    createResetToken,
+    findValidResetToken,
+    markResetTokenUsed,
+    invalidateUserResetTokens
+} = require("../database/passwordResetTokenModel");
+
 const router = express.Router();
+
+// =====================================================
+// CSRF TOKEN BOOTSTRAP
+// GET /api/auth/csrf
+//
+// The frontend is hosted on nyayaai.online while the API is
+// hosted on Render. Because browser JavaScript cannot read a
+// cookie belonging to the API domain, the CSRF token is also
+// returned in this same-origin-authorized response body. The
+// browser still stores the token in the API-domain cookie, and
+// subsequent state-changing requests must echo the same value
+// in X-CSRF-Token. CORS prevents an untrusted origin from
+// reading this response.
+// =====================================================
+
+router.get("/csrf", (req, res) => {
+    try {
+        const existingToken = req.cookies && req.cookies[CSRF_COOKIE];
+        const token =
+            typeof existingToken === "string" && /^[a-f0-9]{64}$/i.test(existingToken)
+                ? existingToken
+                : issueCsrfCookie(res, ACCESS_TOKEN_TTL_MS);
+
+        return res.json({
+            success: true,
+            csrfToken: token
+        });
+    } catch (error) {
+        console.error("CSRF TOKEN ERROR:", error);
+        return res.status(500).json({
+            success: false,
+            message: "Failed to initialize CSRF protection."
+        });
+    }
+});
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -36,6 +108,41 @@ if (!JWT_SECRET) {
 }
 
 const SIGNUP_OTP_PURPOSE = "signup";
+const PASSWORD_RESET_TOKEN_TTL_MS = 10 * 60 * 1000; // 10 minutes
+
+
+// =====================================================
+// ISSUE SESSION (access + refresh cookies)
+// Central helper so every login path (citizen, advocate,
+// Google) sets cookies the same way.
+// =====================================================
+
+async function issueSession(res, user) {
+
+    const accessToken = signAccessToken(user);
+
+    const refreshToken = generateRefreshToken();
+    const refreshTokenHash = hashToken(refreshToken);
+    const refreshExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+
+    await insertRefreshToken(user.id, refreshTokenHash, refreshExpiresAt);
+
+    res.cookie(
+        ACCESS_TOKEN_COOKIE,
+        accessToken,
+        accessCookieOptions(ACCESS_TOKEN_TTL_MS)
+    );
+
+    res.cookie(
+        REFRESH_TOKEN_COOKIE,
+        refreshToken,
+        refreshCookieOptions(REFRESH_TOKEN_TTL_MS)
+    );
+
+    // Paired CSRF token — readable by frontend JS, required as
+    // a header on subsequent state-changing requests.
+    issueCsrfCookie(res, ACCESS_TOKEN_TTL_MS);
+}
 
 
 // =====================================================
@@ -216,6 +323,30 @@ router.post("/signup", async (req, res) => {
 
         }
 
+        // IMPORTANT:
+        // The signup form previously accepted any non-empty
+        // password (even a single character). Enforce the same
+        // minimum-length policy used by the password reset flow
+        // so every account is created with a reasonably strong
+        // password.
+        if (String(password).length < 8) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 8 characters."
+            });
+
+        }
+
+        if (String(password).length > 128) {
+
+            return res.status(400).json({
+                success: false,
+                message: "Password must not exceed 128 characters."
+            });
+
+        }
+
         const cleanEmail = email.trim().toLowerCase();
 
         const existingUser =
@@ -361,21 +492,11 @@ router.post("/google", async (req, res) => {
             await ensureLawyerProfile(user.id);
         }
 
-        const token = jwt.sign(
-            {
-                id: user.id,
-                email: user.email,
-                role: user.role
-            },
-            JWT_SECRET,
-            { expiresIn: "7d" }
-        );
+        await issueSession(res, user);
 
         res.json({
 
             success: true,
-
-            token,
 
             user: {
                 id: user.id,
@@ -510,9 +631,26 @@ router.post("/forgot-password/verify-otp", async (req, res) => {
             String(otp).trim()
         );
 
+        // -----------------------------------------------
+        // Issue a short-lived, single-use reset token.
+        // The frontend carries this (not the OTP, not the
+        // user's password) to the final reset step, so the
+        // reset endpoint no longer relies on OTP "verified"
+        // database state alone.
+        // -----------------------------------------------
+
+        await invalidateUserResetTokens(user.id);
+
+        const resetToken = crypto.randomBytes(32).toString("hex");
+        const resetTokenHash = hashToken(resetToken);
+        const resetTokenExpiresAt = new Date(Date.now() + PASSWORD_RESET_TOKEN_TTL_MS);
+
+        await createResetToken(user.id, resetTokenHash, resetTokenExpiresAt);
+
         res.json({
             success: true,
-            message: "Code verified. You can now create a new password."
+            message: "Code verified. You can now create a new password.",
+            resetToken
         });
 
     } catch (err) {
@@ -545,7 +683,7 @@ router.post("/forgot-password/reset", async (req, res) => {
 
     try {
 
-        const { email, newPassword, role } = req.body;
+        const { email, newPassword, role, resetToken } = req.body;
 
         if (!email || !newPassword) {
             return res.status(400).json({
@@ -554,10 +692,24 @@ router.post("/forgot-password/reset", async (req, res) => {
             });
         }
 
-        if (String(newPassword).length < 6) {
+        if (!resetToken) {
             return res.status(400).json({
                 success: false,
-                message: "Password must be at least 6 characters."
+                message: "Please verify the password reset code first."
+            });
+        }
+
+        if (String(newPassword).length < 8) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must be at least 8 characters."
+            });
+        }
+
+        if (String(newPassword).length > 128) {
+            return res.status(400).json({
+                success: false,
+                message: "Password must not exceed 128 characters."
             });
         }
 
@@ -572,28 +724,40 @@ router.post("/forgot-password/reset", async (req, res) => {
             });
         }
 
-        const resetOtp = await require("../database/otpModel").findOtp(
-            cleanEmail,
-            "password_reset"
-        );
+        // -----------------------------------------------
+        // Verify the single-use reset token issued after OTP
+        // verification. This — not raw OTP database state —
+        // is what authorizes the password change.
+        // -----------------------------------------------
 
-        if (!resetOtp || !resetOtp.verified) {
+        const resetTokenHash = hashToken(String(resetToken));
+        const tokenRow = await findValidResetToken(resetTokenHash);
+
+        if (
+            !tokenRow ||
+            Number(tokenRow.user_id) !== Number(user.id) ||
+            !timingSafeEqualHex(hashToken(String(resetToken)), tokenRow.token_hash)
+        ) {
             return res.status(400).json({
                 success: false,
-                message: "Please verify the password reset code first."
-            });
-        }
-
-        if (new Date(resetOtp.expires_at).getTime() < Date.now()) {
-            return res.status(400).json({
-                success: false,
-                message: "The verification code has expired. Please request a new one."
+                message: "This reset link is invalid or has expired. Please request a new code."
             });
         }
 
         const hashedPassword = await bcrypt.hash(newPassword, 10);
         await updateUserPassword(user.id, hashedPassword);
+
+        // Single-use: burn this token and any other outstanding
+        // ones for the account, plus the OTP that authorized it.
+        await markResetTokenUsed(tokenRow.id);
+        await invalidateUserResetTokens(user.id);
         await clearOtp(cleanEmail, "password_reset");
+
+        // A password reset is a strong signal any existing
+        // sessions should not continue — revoke refresh tokens
+        // so previously issued sessions can't outlive the
+        // password change.
+        await revokeAllTokensForUser(user.id);
 
         res.json({
             success: true,
@@ -645,14 +809,18 @@ router.post("/login", async (req, res) => {
                 email.trim()
             );
 
-        if (!user) {
+        // IMPORTANT:
+        // Use one generic message for "no such user" and
+        // "wrong password" so a caller cannot use the login
+        // endpoint to enumerate which emails have accounts.
+        if (!user || !user.password) {
 
             return res.status(401).json({
 
                 success: false,
 
                 message:
-                    "User not found"
+                    "Invalid email or password"
 
             });
 
@@ -671,7 +839,7 @@ router.post("/login", async (req, res) => {
                 success: false,
 
                 message:
-                    "Invalid password"
+                    "Invalid email or password"
 
             });
 
@@ -692,28 +860,11 @@ router.post("/login", async (req, res) => {
 
         }
 
-        const token =
-            jwt.sign(
-
-                {
-                    id: user.id,
-                    email: user.email,
-                    role: user.role
-                },
-
-                JWT_SECRET,
-
-                {
-                    expiresIn: "7d"
-                }
-
-            );
+        await issueSession(res, user);
 
         res.json({
 
             success: true,
-
-            token,
 
             user: {
 
@@ -787,14 +938,18 @@ router.post("/advocate-login", async (req, res) => {
                 email.trim()
             );
 
-        if (!user) {
+        // IMPORTANT:
+        // Use one generic message for "no such user" and
+        // "wrong password" so a caller cannot use the login
+        // endpoint to enumerate which emails have accounts.
+        if (!user || !user.password) {
 
             return res.status(401).json({
 
                 success: false,
 
                 message:
-                    "User not found"
+                    "Invalid email or password"
 
             });
 
@@ -813,7 +968,7 @@ router.post("/advocate-login", async (req, res) => {
                 success: false,
 
                 message:
-                    "Invalid password"
+                    "Invalid email or password"
 
             });
 
@@ -834,28 +989,11 @@ router.post("/advocate-login", async (req, res) => {
 
         }
 
-        const token =
-            jwt.sign(
-
-                {
-                    id: user.id,
-                    email: user.email,
-                    role: user.role
-                },
-
-                JWT_SECRET,
-
-                {
-                    expiresIn: "7d"
-                }
-
-            );
+        await issueSession(res, user);
 
         res.json({
 
             success: true,
-
-            token,
 
             user: {
 
@@ -1140,6 +1278,153 @@ router.put(
 
     }
 );
+
+
+// =====================================================
+// REFRESH ACCESS TOKEN
+// POST /api/auth/refresh
+// Reads the HttpOnly refresh cookie, rotates it, and
+// issues a new short-lived access token + refresh token.
+// =====================================================
+
+router.post("/refresh", async (req, res) => {
+
+    try {
+
+        const refreshToken = req.cookies && req.cookies[REFRESH_TOKEN_COOKIE];
+
+        if (!refreshToken) {
+            return res.status(401).json({
+                success: false,
+                message: "No active session."
+            });
+        }
+
+        const tokenHash = hashToken(refreshToken);
+        const tokenRow = await findRefreshTokenByHash(tokenHash);
+
+        // Reuse / theft detection: a refresh token that is
+        // unknown, already revoked, or expired is treated as a
+        // possible replay of a stolen token. If we can identify
+        // the account it belonged to, every outstanding session
+        // for that account is revoked as a precaution.
+        if (!tokenRow || tokenRow.revoked || new Date(tokenRow.expires_at).getTime() < Date.now()) {
+
+            if (tokenRow && tokenRow.revoked) {
+                await revokeAllTokensForUser(tokenRow.user_id);
+            }
+
+            res.clearCookie(ACCESS_TOKEN_COOKIE, clearCookieOptions());
+            res.clearCookie(REFRESH_TOKEN_COOKIE, clearCookieOptions());
+            res.clearCookie(CSRF_COOKIE, csrfClearCookieOptions());
+
+            return res.status(401).json({
+                success: false,
+                message: "Session expired. Please sign in again."
+            });
+        }
+
+        const user = await findUserById(tokenRow.user_id);
+
+        if (!user) {
+            res.clearCookie(ACCESS_TOKEN_COOKIE, clearCookieOptions());
+            res.clearCookie(REFRESH_TOKEN_COOKIE, clearCookieOptions());
+            res.clearCookie(CSRF_COOKIE, csrfClearCookieOptions());
+
+            return res.status(401).json({
+                success: false,
+                message: "Session expired. Please sign in again."
+            });
+        }
+
+        // Rotate: the old refresh token is single-use.
+        await revokeRefreshTokenByHash(tokenHash);
+
+        const newAccessToken = signAccessToken(user);
+        const newRefreshToken = generateRefreshToken();
+        const newRefreshTokenHash = hashToken(newRefreshToken);
+        const newRefreshExpiresAt = new Date(Date.now() + REFRESH_TOKEN_TTL_MS);
+
+        await insertRefreshToken(user.id, newRefreshTokenHash, newRefreshExpiresAt);
+
+        res.cookie(
+            ACCESS_TOKEN_COOKIE,
+            newAccessToken,
+            accessCookieOptions(ACCESS_TOKEN_TTL_MS)
+        );
+
+        res.cookie(
+            REFRESH_TOKEN_COOKIE,
+            newRefreshToken,
+            refreshCookieOptions(REFRESH_TOKEN_TTL_MS)
+        );
+
+        // Rotate the CSRF token together with the access token.
+        issueCsrfCookie(res, ACCESS_TOKEN_TTL_MS);
+
+        res.json({
+            success: true,
+            user: {
+                id: user.id,
+                fullName: user.full_name,
+                email: user.email,
+                phone: user.phone || "",
+                role: user.role
+            }
+        });
+
+    } catch (err) {
+
+        console.error("REFRESH TOKEN ERROR:", err);
+
+        res.status(500).json({
+            success: false,
+            message: "Failed to refresh session."
+        });
+
+    }
+
+});
+
+
+// =====================================================
+// LOGOUT
+// POST /api/auth/logout
+// Clears both auth cookies and revokes the refresh token
+// server-side so it cannot be replayed.
+// =====================================================
+
+router.post("/logout", async (req, res) => {
+
+    try {
+
+        const refreshToken = req.cookies && req.cookies[REFRESH_TOKEN_COOKIE];
+
+        if (refreshToken) {
+            await revokeRefreshTokenByHash(hashToken(refreshToken));
+        }
+
+    } catch (err) {
+
+        console.error("LOGOUT ERROR:", err);
+
+        // Even if revocation fails, still clear the cookies below
+        // so the browser no longer presents them.
+
+    } finally {
+
+        res.clearCookie(ACCESS_TOKEN_COOKIE, clearCookieOptions());
+        res.clearCookie(REFRESH_TOKEN_COOKIE, clearCookieOptions());
+        res.clearCookie(CSRF_COOKIE, csrfClearCookieOptions());
+
+        res.json({
+            success: true,
+            message: "Logged out."
+        });
+
+    }
+
+});
 
 
 module.exports = router;                                                                                                            

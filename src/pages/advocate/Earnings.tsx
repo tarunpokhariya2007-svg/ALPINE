@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { isLoggedIn } from '../../lib/auth'
 import {
   DollarSign,
   TrendingUp,
@@ -11,7 +12,7 @@ import {
 // API
 // =====================================================
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 
 // =====================================================
@@ -31,18 +32,6 @@ interface Transaction {
   date: string
   amount: number | null
   status: string
-}
-
-
-// =====================================================
-// TOKEN
-// =====================================================
-
-function getToken() {
-  return (
-    localStorage.getItem('token') ||
-    ''
-  )
 }
 
 
@@ -112,11 +101,7 @@ export default function Earnings() {
         setError('')
 
 
-        const token =
-          getToken()
-
-
-        if (!token) {
+        if (!isLoggedIn()) {
 
           setError(
             'Authentication token not found.'
@@ -151,11 +136,9 @@ export default function Earnings() {
             `${API_URL}/api/lawyers/earnings`,
             {
               method: 'GET',
+              credentials: 'include',
 
               headers: {
-
-                Authorization:
-                  `Bearer ${token}`,
 
                 'Content-Type':
                   'application/json',

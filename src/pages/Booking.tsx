@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router'
+import { isLoggedIn } from '../lib/auth'
 import {
   Calendar,
   Clock,
@@ -12,7 +13,7 @@ import {
   ChevronRight
 } from 'lucide-react'
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 const timeSlots = [
   '9:00 AM',
@@ -534,9 +535,7 @@ export default function Booking() {
     try {
       setBookingLoading(true)
 
-      const token = localStorage.getItem('token')
-
-      if (!token) {
+      if (!isLoggedIn()) {
         alert('Please login before requesting an appointment.')
         return
       }
@@ -551,9 +550,9 @@ export default function Booking() {
         `${API_URL}/api/appointments`,
         {
           method: 'POST',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({
             advocateId: Number(advocateId),

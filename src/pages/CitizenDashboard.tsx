@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { isLoggedIn, getStoredUser } from '../lib/auth'
 import {
   MessageSquare,
   Upload,
@@ -15,6 +16,8 @@ import {
   Zap,
   Calendar,
 } from 'lucide-react'
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 const quickActions = [
   {
@@ -142,16 +145,7 @@ export default function CitizenDashboard() {
   const [caseError, setCaseError] = useState('')
 
   // Get logged-in citizen
-  let savedUser: any = {}
-
-  try {
-    savedUser = JSON.parse(
-      localStorage.getItem('user') || '{}'
-    )
-  } catch (error) {
-    console.error('USER JSON ERROR:', error)
-    savedUser = {}
-  }
+  const savedUser: any = getStoredUser() || {}
 
   const userName =
     savedUser.fullName ||
@@ -168,21 +162,19 @@ export default function CitizenDashboard() {
         setLoadingCases(true)
         setCaseError('')
 
-        const token = localStorage.getItem('token')
-
-        if (!token) {
+        if (!isLoggedIn()) {
           setCases([])
           setCaseError('Please login again to load your cases.')
           return
         }
 
         const response = await fetch(
-          'https://legal-ai-z7vb.onrender.com/api/cases',
+          `${API_URL}/api/cases`,
           {
             method: 'GET',
+            credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
             },
           }
         )
@@ -226,20 +218,13 @@ export default function CitizenDashboard() {
         setLoadingAdvocates(true)
         setAdvocateError('')
 
-        const token = localStorage.getItem('token')
-
         const response = await fetch(
-          'https://legal-ai-z7vb.onrender.com/api/lawyers',
+          `${API_URL}/api/lawyers`,
           {
             method: 'GET',
+            credentials: 'include',
             headers: {
               'Content-Type': 'application/json',
-
-              ...(token
-                ? {
-                    Authorization: `Bearer ${token}`,
-                  }
-                : {}),
             },
           }
         )

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Search, MessageSquare, Calendar, Users } from 'lucide-react'
+import { isLoggedIn } from '../../lib/auth'
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 
 // =====================================================
@@ -56,15 +57,6 @@ const avatarColors = [
   '#F59E0B',
   '#06B6D4',
 ]
-
-
-// =====================================================
-// GET TOKEN
-// =====================================================
-
-function getToken() {
-  return localStorage.getItem('token') || ''
-}
 
 
 // =====================================================
@@ -127,11 +119,7 @@ export default function Clients() {
         setLoading(true)
         setError('')
 
-        const token =
-          getToken()
-
-
-        if (!token) {
+        if (!isLoggedIn()) {
 
           setError(
             'Authentication token not found.'
@@ -164,11 +152,9 @@ export default function Clients() {
             `${API_URL}/api/lawyers/clients`,
             {
               method: 'GET',
+              credentials: 'include',
 
               headers: {
-                Authorization:
-                  `Bearer ${token}`,
-
                 'Content-Type':
                   'application/json',
               },

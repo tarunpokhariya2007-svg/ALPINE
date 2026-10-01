@@ -23,7 +23,7 @@ interface CaseItem {
   updated_at: string
 }
 
-const API_BASE = 'https://legal-ai-z7vb.onrender.com'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 const statusColor: Record<
   string,
@@ -75,21 +75,11 @@ export default function Cases() {
     try {
       setLoading(true)
 
-      const token = localStorage.getItem('token')
-
-      if (!token) {
-        console.error('No authentication token found')
-        setCases([])
-        return
-      }
-
       const response = await fetch(
         `${API_BASE}/api/cases`,
         {
           method: 'GET',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          credentials: 'include',
         }
       )
 
@@ -146,21 +136,11 @@ export default function Cases() {
     try {
       setDeletingId(caseId)
 
-      const token =
-        localStorage.getItem('token')
-
-      if (!token) {
-        alert('Please login again.')
-        return
-      }
-
       const response = await fetch(
         `${API_BASE}/api/cases/${caseId}`,
         {
           method: 'DELETE',
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
+          credentials: 'include',
         }
       )
 

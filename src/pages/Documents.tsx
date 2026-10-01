@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router";
+import { isLoggedIn } from "../lib/auth";
 import {
   Upload,
   FileText,
@@ -27,7 +28,7 @@ type ProtectedAction =
   | "rename"
   | "delete";
 
-const API_BASE = "https://legal-ai-z7vb.onrender.com";
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 export default function Documents() {
   const location = useLocation();
@@ -101,23 +102,14 @@ export default function Documents() {
   };
 
   // =====================================================
-  // GET TOKEN
-  // =====================================================
-
-  const getToken = () => {
-    return localStorage.getItem("token");
-  };
-
-  // =====================================================
   // CHECK DOCUMENT SECURITY PASSWORD
   // =====================================================
 
   useEffect(() => {
     const checkDocumentSecurity = async () => {
       try {
-        const token = getToken();
 
-        if (!token) {
+        if (!isLoggedIn()) {
           setSecurityLoading(false);
           setLoading(false);
           return;
@@ -127,8 +119,8 @@ export default function Documents() {
           `${API_BASE}/api/document-security/status`,
           {
             method: "GET",
+            credentials: "include",
             headers: {
-              Authorization: `Bearer ${token}`,
             },
           }
         );
@@ -198,9 +190,8 @@ export default function Documents() {
     try {
       setLoading(true);
 
-      const token = getToken();
 
-      if (!token) {
+      if (!isLoggedIn()) {
         console.error("No login token found");
         setLoading(false);
         return;
@@ -210,8 +201,8 @@ export default function Documents() {
         `${API_BASE}/api/documents`,
         {
           method: "GET",
+          credentials: "include",
           headers: {
-            Authorization: `Bearer ${token}`,
             "X-Document-Password":
               documentPassword,
           },
@@ -398,9 +389,8 @@ export default function Documents() {
     try {
       setSecuritySubmitting(true);
 
-      const token = getToken();
 
-      if (!token) {
+      if (!isLoggedIn()) {
         setSecurityError(
           "Please login again."
         );
@@ -411,9 +401,9 @@ export default function Documents() {
         `${API_BASE}/api/document-security/set-password`,
         {
           method: "POST",
+          credentials: "include",
           headers: {
             "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
           },
           body: JSON.stringify({
             password: securityPassword,
@@ -487,9 +477,8 @@ export default function Documents() {
       try {
         setSecuritySubmitting(true);
 
-        const token = getToken();
 
-        if (!token) {
+        if (!isLoggedIn()) {
           setSecurityError(
             "Please login again."
           );
@@ -500,9 +489,9 @@ export default function Documents() {
           `${API_BASE}/api/document-security/verify-password`,
           {
             method: "POST",
+            credentials: "include",
             headers: {
               "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
             },
             body: JSON.stringify({
               password: securityPassword,
@@ -671,9 +660,8 @@ export default function Documents() {
     try {
       setUploading(true);
 
-      const token = getToken();
 
-      if (!token) {
+      if (!isLoggedIn()) {
         alert("Please login again.");
         return;
       }
@@ -698,8 +686,9 @@ export default function Documents() {
         {
           method: "POST",
 
+          credentials: "include",
+
           headers: {
-            Authorization: `Bearer ${token}`,
 
             // Used by the protected backend
             // document-upload endpoint.
@@ -834,9 +823,8 @@ export default function Documents() {
     }
 
     try {
-      const token = getToken();
 
-      if (!token) {
+      if (!isLoggedIn()) {
         alert(
           "Please login again."
         );
@@ -853,8 +841,9 @@ export default function Documents() {
         {
           method: "DELETE",
 
+          credentials: "include",
+
           headers: {
-            Authorization: `Bearer ${token}`,
 
             "X-Document-Password":
               documentPassword || "",
@@ -970,9 +959,8 @@ export default function Documents() {
     }
 
     try {
-      const token = getToken();
 
-      if (!token) {
+      if (!isLoggedIn()) {
         alert(
           "Please login again."
         );
@@ -985,12 +973,12 @@ export default function Documents() {
           {
             method: "PUT",
 
+            credentials: "include",
+
             headers: {
               "Content-Type":
                 "application/json",
 
-              Authorization:
-                `Bearer ${token}`,
 
               "X-Document-Password":
                 documentPassword || "",
@@ -1086,9 +1074,8 @@ export default function Documents() {
     }
 
     try {
-      const token = getToken();
 
-      if (!token) {
+      if (!isLoggedIn()) {
         alert(
           "Please login again."
         );
@@ -1101,9 +1088,9 @@ export default function Documents() {
           {
             method: "GET",
 
+            credentials: "include",
+
             headers: {
-              Authorization:
-                `Bearer ${token}`,
 
               "X-Document-Password":
                 documentPassword,
@@ -1196,10 +1183,8 @@ export default function Documents() {
       }
 
       try {
-        const token =
-          getToken();
 
-        if (!token) {
+        if (!isLoggedIn()) {
           alert(
             "Please login again."
           );
@@ -1212,9 +1197,9 @@ export default function Documents() {
             {
               method: "GET",
 
+              credentials: "include",
+
               headers: {
-                Authorization:
-                  `Bearer ${token}`,
 
                 "X-Document-Password":
                   documentPassword,

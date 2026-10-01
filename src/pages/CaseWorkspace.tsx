@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router'
+import { isLoggedIn } from '../lib/auth'
 import {
   ArrowLeft,
   FileText,
@@ -12,7 +13,7 @@ import {
   Loader2,
 } from 'lucide-react'
 
-const API_BASE = 'https://legal-ai-z7vb.onrender.com'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 type CaseStatus = 'open' | 'in_progress' | 'resolved' | 'closed'
 
@@ -64,9 +65,7 @@ export default function CaseWorkspace() {
 
   useEffect(() => {
     const loadCase = async () => {
-      const token = localStorage.getItem('token')
-
-      if (!token) {
+      if (!isLoggedIn()) {
         navigate('/login')
         return
       }
@@ -83,9 +82,7 @@ export default function CaseWorkspace() {
         const response = await fetch(
           `${API_BASE}/api/cases/${id}`,
           {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
+            credentials: 'include',
           }
         )
 

@@ -33,7 +33,7 @@ interface Notif {
   color: string
 }
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 function getNotificationStyle(type: string) {
   const normalized = String(type || '').toLowerCase()
@@ -168,23 +168,15 @@ export default function Notifications() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
-  const token =
-    localStorage.getItem('token') ||
-    localStorage.getItem('authToken')
-
   const fetchNotifications = async () => {
     try {
       setError('')
 
       const response = await fetch(`${API_URL}/api/notifications`, {
         method: 'GET',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          ...(token
-            ? {
-                Authorization: `Bearer ${token}`,
-              }
-            : {}),
         },
       })
 
@@ -217,13 +209,9 @@ export default function Notifications() {
         `${API_URL}/api/notifications/read-all`,
         {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(token
-              ? {
-                  Authorization: `Bearer ${token}`,
-                }
-              : {}),
           },
         }
       )
@@ -255,13 +243,9 @@ export default function Notifications() {
         `${API_URL}/api/notifications/${id}/read`,
         {
           method: 'PUT',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(token
-              ? {
-                  Authorization: `Bearer ${token}`,
-                }
-              : {}),
           },
         }
       )
@@ -296,13 +280,9 @@ export default function Notifications() {
         `${API_URL}/api/notifications/${id}`,
         {
           method: 'DELETE',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            ...(token
-              ? {
-                  Authorization: `Bearer ${token}`,
-                }
-              : {}),
           },
         }
       )

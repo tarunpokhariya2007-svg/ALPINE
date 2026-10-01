@@ -23,12 +23,15 @@ import {
     Socket
 } from "socket.io-client";
 
+import { isLoggedIn } from "../lib/auth";
+
 // =====================================================
 // CONFIGURATION
 // =====================================================
 
 const BACKEND_URL =
-    "https://legal-ai-z7vb.onrender.com";
+    import.meta.env.VITE_API_URL ||
+    "http://localhost:5001";
 
 const SOCKET_URL =
     BACKEND_URL;
@@ -77,18 +80,9 @@ interface Participant {
     role: string;
 }
 
-interface JwtUser {
-    id?: number | string;
-    role?: string;
-}
-
 // =====================================================
 // HELPERS
 // =====================================================
-
-function getToken(): string | null {
-    return localStorage.getItem("token");
-}
 
 function getAppointmentId(): string | null {
     const parts =
@@ -109,41 +103,6 @@ function getAppointmentId(): string | null {
     }
 
     return parts[index + 1];
-}
-
-function decodeJwt(
-    token: string
-): JwtUser | null {
-
-    try {
-
-        const payload =
-            token.split(".")[1];
-
-        if (!payload) {
-            return null;
-        }
-
-        const decoded =
-            JSON.parse(
-                atob(
-                    payload
-                        .replace(/-/g, "+")
-                        .replace(/_/g, "/")
-                )
-            );
-
-        return decoded;
-
-    } catch (error) {
-
-        console.error(
-            "JWT decode error:",
-            error
-        );
-
-        return null;
-    }
 }
 
 function formatMeetingDate(
@@ -253,11 +212,6 @@ export default function Meeting() {
             null
         );
 
-    const tokenRef =
-        useRef<string | null>(
-            null
-        );
-
     const participantConnectedRef =
         useRef(false);
 
@@ -284,9 +238,6 @@ export default function Meeting() {
         appointmentIdRef.current =
             getAppointmentId();
 
-        tokenRef.current =
-            getToken();
-
         if (
             !appointmentIdRef.current
         ) {
@@ -300,7 +251,7 @@ export default function Meeting() {
             return;
         }
 
-        if (!tokenRef.current) {
+        if (!isLoggedIn()) {
 
             setError(
                 "Please log in before joining the consultation."
@@ -326,12 +277,9 @@ export default function Meeting() {
             const appointmentId =
                 appointmentIdRef.current;
 
-            const token =
-                tokenRef.current;
-
             if (
                 !appointmentId ||
-                !token
+                !isLoggedIn()
             ) {
                 return;
             }
@@ -349,11 +297,7 @@ export default function Meeting() {
                         `${BACKEND_URL}/api/meetings/${appointmentId}`,
                         {
                             method: "GET",
-
-                            headers: {
-                                Authorization:
-                                    `Bearer ${token}`
-                            }
+                            credentials: "include",
                         }
                     );
 
@@ -830,14 +774,11 @@ export default function Meeting() {
         useCallback(
             async () => {
 
-                const token =
-                    tokenRef.current;
-
                 const appointmentId =
                     appointmentIdRef.current;
 
                 if (
-                    !token ||
+                    !isLoggedIn() ||
                     !appointmentId
                 ) {
 
@@ -856,9 +797,11 @@ export default function Meeting() {
                                 "polling"
                             ],
 
-                            auth: {
-                                token
-                            },
+                            // HttpOnly auth cookie is sent
+                            // automatically with the handshake;
+                            // no token is read or passed from
+                            // JavaScript.
+                            withCredentials: true,
 
                             reconnection: true,
 

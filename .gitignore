@@ -1,21 +1,8 @@
-# Environment variables
+node_modules/
+dist/
 .env
 .env.*
 !.env.example
-
-# Dependencies
-node_modules/
-
-# Build output
-dist/
-build/
-
-# Backend uploads
-backend/uploads/
-
-# Logs
 *.log
-
-# OS files
+coverage/
 .DS_Store
-Thumbs.db

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
+import { isLoggedIn } from '../../lib/auth'
 
 const navLinks = [
   { label: 'Home', href: '/' },
@@ -45,9 +46,7 @@ export default function Navbar() {
 
     e.preventDefault()
 
-    const token = localStorage.getItem('token')
-
-    if (token) {
+    if (isLoggedIn()) {
       navigate(href)
     } else {
       navigate('/login', {

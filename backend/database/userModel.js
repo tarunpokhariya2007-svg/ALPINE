@@ -158,11 +158,6 @@ async function findUserByGoogleId(googleId) {
 
 async function findUserByEmail(email) {
 
-    console.log(
-        "Searching email:",
-        email
-    );
-
     const sql = `
         SELECT *
         FROM users
@@ -175,10 +170,10 @@ async function findUserByEmail(email) {
         [email]
     );
 
-    console.log(
-        "Rows found:",
-        rows
-    );
+    // NOTE: Intentionally not logging the returned row(s) here —
+    // this query selects the full users row, including the
+    // bcrypt password hash, and logging it would leak sensitive
+    // credential material into server logs.
 
     return rows[0];
 }
@@ -189,11 +184,6 @@ async function findUserByEmail(email) {
 // =====================================================
 
 async function findUserById(userId) {
-
-    console.log(
-        "Searching user ID:",
-        userId
-    );
 
     const sql = `
         SELECT
@@ -210,11 +200,6 @@ async function findUserById(userId) {
     const [rows] = await db.query(
         sql,
         [userId]
-    );
-
-    console.log(
-        "User by ID:",
-        rows[0]
     );
 
     return rows[0];

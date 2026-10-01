@@ -1,5 +1,6 @@
 import { Link, useNavigate } from 'react-router'
 import { useEffect, useRef, useState } from 'react'
+import { isLoggedIn } from '../lib/auth'
 import {
   Scale, ArrowRight, CheckCircle, Shield, Zap, Globe, Lock,
   MessageSquare, Users, FileSearch, MapPin, Mic, ChevronRight,
@@ -143,9 +144,7 @@ export default function Landing() {
   const navigate = useNavigate()
 
   const handleProtectedNavigation = (path: string) => {
-    const token = localStorage.getItem('token')
-
-    if (token) {
+    if (isLoggedIn()) {
       navigate(path)
     } else {
       navigate('/login')

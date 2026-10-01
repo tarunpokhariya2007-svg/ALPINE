@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { isLoggedIn } from '../../lib/auth';
 import {
   Video,
   Calendar,
@@ -11,7 +12,7 @@ import {
   ExternalLink,
 } from 'lucide-react';
 
-const API_BASE_URL = 'https://legal-ai-z7vb.onrender.com';
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
 interface Meeting {
   id: number;
@@ -23,14 +24,6 @@ interface Meeting {
   client_name?: string;
   status?: string;
   mode?: string;
-}
-
-function getToken(): string | null {
-  return (
-    localStorage.getItem('token') ||
-    localStorage.getItem('authToken') ||
-    localStorage.getItem('accessToken')
-  );
 }
 
 function formatDate(dateString: string) {
@@ -92,16 +85,14 @@ export default function Meetings() {
       setLoading(true);
       setError('');
 
-      const token = getToken();
-
-      if (!token) {
+      if (!isLoggedIn()) {
         setError('Please log in to view your meetings.');
         return;
       }
 
       const response = await fetch(`${API_BASE_URL}/api/meetings`, {
+        credentials: 'include',
         headers: {
-          Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });

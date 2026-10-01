@@ -11,7 +11,10 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 const http = require("http");
 const jwt = require("jsonwebtoken");
+const cookieParser = require("cookie-parser");
+const cookie = require("cookie");
 const { Server } = require("socket.io");
+const { ACCESS_TOKEN_COOKIE } = require("./utils/cookieConfig");
 
 // =====================================================
 // ENVIRONMENT / JWT CONFIGURATION
@@ -42,6 +45,8 @@ const db = require("./db");
 
 const { ensureOtpTable } = require("./database/otpModel");
 const { ensureGoogleAuthSupport } = require("./database/userModel");
+const { ensureRefreshTokenTable } = require("./database/refreshTokenModel");
+const { ensurePasswordResetTokenTable } = require("./database/passwordResetTokenModel");
 
 ensureOtpTable().catch((err) => {
     console.error(
@@ -53,6 +58,20 @@ ensureOtpTable().catch((err) => {
 ensureGoogleAuthSupport().catch((err) => {
     console.error(
         "Failed to ensure Google auth support:",
+        err.message
+    );
+});
+
+ensureRefreshTokenTable().catch((err) => {
+    console.error(
+        "Failed to ensure refresh_tokens table:",
+        err.message
+    );
+});
+
+ensurePasswordResetTokenTable().catch((err) => {
+    console.error(
+        "Failed to ensure password_reset_tokens table:",
         err.message
     );
 });
@@ -88,11 +107,14 @@ const { createNotification } = require("./routes/notificationRoutes");
 // =====================================================
 
 const app = express();
+// Render runs the application behind a trusted reverse proxy.
+// This allows express-rate-limit to safely process X-Forwarded-For.
 
+app.set("trust proxy", 1);
 // =====================================================
 // SECURITY HEADERS - HELMET
 // =====================================================
-
+    
 app.use(
     helmet({
         crossOriginResourcePolicy: {
@@ -102,24 +124,32 @@ app.use(
 );
 
 // =====================================================
+// COOKIE PARSER
+// Required so authMiddleware / routes can read the
+// HttpOnly authentication cookies via req.cookies.
+// =====================================================
+
+app.use(cookieParser());
+
+// =====================================================
 // CORS CONFIGURATION
 // =====================================================
+
+const isProduction = process.env.NODE_ENV === "production";
 
 const allowedOrigins = [
     FRONTEND_URL,
     "https://nyayaai.online",
     "https://www.nyayaai.online",
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
 ].filter(Boolean);
 
-// Optional local development origins
-if (!allowedOrigins.includes("http://localhost:5173")) {
-    allowedOrigins.push("http://localhost:5173");
-}
-
-if (!allowedOrigins.includes("http://127.0.0.1:5173")) {
-    allowedOrigins.push("http://127.0.0.1:5173");
+// Localhost origins are only needed for local development
+// and must never be trusted in production.
+if (!isProduction) {
+    allowedOrigins.push(
+        "http://localhost:5173",
+        "http://127.0.0.1:5173"
+    );
 }
 
 app.use(
@@ -160,6 +190,7 @@ app.use(
             "Content-Type",
             "Authorization",
             "X-Document-Password",
+            "X-CSRF-Token",
         ],
     })
 );
@@ -567,8 +598,23 @@ const io =
 io.use(
     (socket, next) => {
         try {
-            const token =
-                socket.handshake.auth?.token;
+            // Preferred: HttpOnly auth cookie, sent automatically
+            // by the browser when the Socket.IO client connects
+            // with `withCredentials: true`. This keeps the JWT
+            // out of frontend JavaScript entirely.
+            let token = null;
+
+            const cookieHeader =
+                socket.handshake.headers?.cookie;
+
+            if (cookieHeader) {
+                const parsedCookies =
+                    cookie.parse(cookieHeader);
+
+                token =
+                    parsedCookies[ACCESS_TOKEN_COOKIE] ||
+                    null;
+            }
 
             if (!token) {
                 console.error(

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { isLoggedIn } from '../../lib/auth'
 import {
   Calendar,
   Clock,
@@ -10,7 +11,7 @@ import {
   RefreshCw
 } from 'lucide-react'
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 type RequestItem = {
   id: number
@@ -23,10 +24,6 @@ type RequestItem = {
   citizen_name?: string
   citizen_email?: string
   advocate_name?: string
-}
-
-function getToken() {
-  return localStorage.getItem('token') || ''
 }
 
 function getMode(notes?: string) {
@@ -66,17 +63,13 @@ export default function ConsultationRequests() {
       setLoading(true)
       setError('')
 
-      const token = getToken()
-
-      if (!token) {
+      if (!isLoggedIn()) {
         setError('Please login as an advocate to view consultation requests.')
         return
       }
 
       const response = await fetch(`${API_URL}/api/appointments`, {
-        headers: {
-          Authorization: `Bearer ${token}`
-        }
+        credentials: 'include',
       })
 
       const data = await response.json()
@@ -110,15 +103,13 @@ export default function ConsultationRequests() {
     try {
       setRespondingId(id)
 
-      const token = getToken()
-
       const response = await fetch(
         `${API_URL}/api/appointments/${id}/respond`,
         {
           method: 'PATCH',
+          credentials: 'include',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${token}`
           },
           body: JSON.stringify({ action })
         }

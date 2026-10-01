@@ -25,6 +25,9 @@ import {
 } from 'lucide-react'
 import { useTheme } from '../../context/ThemeContext'
 import BackButton from './BackButton'
+import { getStoredUser, logout } from '../../lib/auth'
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 const isAdvocatePath = (p: string) => p.startsWith('/advocate')
 
@@ -68,22 +71,7 @@ export default function DashboardLayout() {
   const userLabel = isAdvocate ? 'Advocate' : 'Citizen'
   const homeHref = isAdvocate ? '/advocate' : '/dashboard'
 
-  let savedUser: any = {}
-
-  try {
-    const storedUser = localStorage.getItem('user')
-
-    if (
-      storedUser &&
-      storedUser !== 'undefined' &&
-      storedUser !== 'null'
-    ) {
-      savedUser = JSON.parse(storedUser)
-    }
-  } catch (error) {
-    console.error('Invalid user data in localStorage:', error)
-    savedUser = {}
-  }
+  const savedUser: any = getStoredUser() || {}
 
   const userName =
     savedUser?.fullName ||
@@ -338,9 +326,9 @@ export default function DashboardLayout() {
 
           <button
             onClick={() => {
-              localStorage.removeItem('token')
-              localStorage.removeItem('user')
-              navigate('/')
+              logout(API_BASE_URL).finally(() => {
+                navigate('/')
+              })
             }}
             style={{
               flex: 1,

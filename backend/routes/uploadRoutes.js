@@ -94,6 +94,133 @@ const upload = multer({
 });
 
 /* =========================================================
+   MAGIC-BYTE / FILE-SIGNATURE VALIDATION
+
+   SECURITY FIX:
+   multer's fileFilter above only checks the MIME type the
+   BROWSER reported for the upload (the multipart Content-Type
+   part). That value is fully attacker-controlled — a client
+   can rename a script or executable, set Content-Type to
+   "application/pdf", and it would previously pass this check
+   untouched.
+
+   This checks the file's actual leading bytes against the
+   known signatures for every type we claim to support, so a
+   mislabeled/malicious file is rejected and removed even
+   though multer already wrote it to disk.
+========================================================= */
+
+function matchesSignature(buffer, signature, offset = 0) {
+    if (buffer.length < offset + signature.length) {
+        return false;
+    }
+
+    for (let i = 0; i < signature.length; i++) {
+        if (buffer[offset + i] !== signature[i]) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+function fileSignatureMatchesMimeType(buffer, mimetype) {
+    switch (mimetype) {
+        case "application/pdf":
+            return matchesSignature(buffer, [0x25, 0x50, 0x44, 0x46]); // %PDF
+
+        case "image/png":
+            return matchesSignature(
+                buffer,
+                [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+            );
+
+        case "image/jpeg":
+        case "image/jpg":
+            return matchesSignature(buffer, [0xff, 0xd8, 0xff]);
+
+        case "image/webp":
+            return (
+                matchesSignature(buffer, [0x52, 0x49, 0x46, 0x46]) && // RIFF
+                matchesSignature(buffer, [0x57, 0x45, 0x42, 0x50], 8) // WEBP
+            );
+
+        case "image/gif":
+            return (
+                matchesSignature(buffer, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
+                matchesSignature(buffer, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+            );
+
+        case "audio/mpeg":
+        case "audio/mp3":
+            return (
+                matchesSignature(buffer, [0x49, 0x44, 0x33]) || // ID3
+                matchesSignature(buffer, [0xff, 0xfb]) ||
+                matchesSignature(buffer, [0xff, 0xf3]) ||
+                matchesSignature(buffer, [0xff, 0xf2])
+            );
+
+        case "audio/wav":
+        case "audio/x-wav":
+            return matchesSignature(buffer, [0x52, 0x49, 0x46, 0x46]); // RIFF
+
+        case "audio/mp4":
+        case "audio/x-m4a":
+        case "video/mp4":
+        case "video/quicktime":
+            // MP4/M4A/MOV all use the ISO base media container:
+            // bytes 4-7 spell "ftyp".
+            return matchesSignature(buffer, [0x66, 0x74, 0x79, 0x70], 4);
+
+        case "video/webm":
+            return matchesSignature(
+                buffer,
+                [0x1a, 0x45, 0xdf, 0xa3]
+            );
+
+        default:
+            return false;
+    }
+}
+
+async function verifyUploadedFileSignature(req, res, next) {
+    if (!req.file) {
+        return next();
+    }
+
+    try {
+        const handle = await fs.promises.open(req.file.path, "r");
+        const headerBuffer = Buffer.alloc(16);
+
+        await handle.read(headerBuffer, 0, 16, 0);
+        await handle.close();
+
+        if (!fileSignatureMatchesMimeType(headerBuffer, req.file.mimetype)) {
+            fs.unlink(req.file.path, () => {});
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    "This file's contents do not match its file type and was rejected."
+            });
+        }
+
+        next();
+    } catch (error) {
+        console.error("FILE SIGNATURE CHECK ERROR:", error);
+
+        if (req.file && req.file.path) {
+            fs.unlink(req.file.path, () => {});
+        }
+
+        return res.status(500).json({
+            success: false,
+            message: "Unable to validate uploaded file."
+        });
+    }
+}
+
+/* =========================================================
    DOCUMENT PASSWORD MIDDLEWARE
 ========================================================= */
 
@@ -253,6 +380,7 @@ router.post(
     authMiddleware,
     documentPasswordMiddleware,
     upload.single("document"),
+    verifyUploadedFileSignature,
     async (req, res) => {
         try {
             if (!req.file) {

@@ -138,11 +138,53 @@ async function initializeAppointmentsTable() {
 
 
 // =====================================================
+// CREATE CONSULTATION MEETINGS TABLE
+// =====================================================
+
+async function initializeConsultationMeetingsTable() {
+    try {
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS consultation_meetings (
+                id INT NOT NULL AUTO_INCREMENT,
+                appointment_id INT NOT NULL,
+                room_name VARCHAR(255) NOT NULL,
+                scheduled_start DATETIME NOT NULL,
+                scheduled_end DATETIME NOT NULL,
+                created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+
+                PRIMARY KEY (id),
+
+                UNIQUE KEY uq_consultation_meetings_appointment (appointment_id),
+                INDEX idx_consultation_meetings_start (scheduled_start),
+
+                CONSTRAINT fk_consultation_meetings_appointment
+                    FOREIGN KEY (appointment_id)
+                    REFERENCES appointments(id)
+                    ON DELETE CASCADE
+            )
+        `);
+
+        console.log("CONSULTATION MEETINGS TABLE READY");
+    } catch (error) {
+        console.error(
+            "FAILED TO CREATE CONSULTATION MEETINGS TABLE:",
+            error.message
+        );
+    }
+}
+
+
+// =====================================================
 // INITIALIZE DATABASE TABLES
 // =====================================================
 
-initializeNotificationsTable();
-initializeAppointmentsTable();
+async function initializeDatabaseTables() {
+    await initializeNotificationsTable();
+    await initializeAppointmentsTable();
+    await initializeConsultationMeetingsTable();
+}
+
+initializeDatabaseTables();
 
 
 // =====================================================

@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router'
+import { isLoggedIn } from '../lib/auth'
 import jsPDF from 'jspdf'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -22,8 +23,8 @@ timeline?: string
 }
 }
 const API_BASE_URL =
-(import.meta as any).env?.VITE_API_URL ||
-'https://legal-ai-z7vb.onrender.com'
+import.meta.env.VITE_API_URL ||
+'http://localhost:5001'
 const suggestedPrompts = [
 'My landlord is refusing to return my security deposit',
 'I was wrongfully terminated without notice period',
@@ -103,16 +104,12 @@ const audioPlayerRef = useRef<HTMLAudioElement | null>(null)
 const speechRecognitionRef = useRef<any>(null)
 const loadConversations = async () => {
 try {
-const token = localStorage.getItem("token")
-
-  if (!token) return
+if (!isLoggedIn()) return
 
   const res = await fetch(
     `${API_BASE_URL}/api/chat/conversations`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      credentials: "include",
     }
   )
 
@@ -144,9 +141,7 @@ const token = localStorage.getItem("token")
 }
 const loadConversation = async (id: string) => {
 try {
-const token = localStorage.getItem("token")
-
-  if (!token) {
+if (!isLoggedIn()) {
     alert("Please login again.")
     return
   }
@@ -154,9 +149,7 @@ const token = localStorage.getItem("token")
   const res = await fetch(
     `${API_BASE_URL}/api/chat/conversations/${id}/messages`,
     {
-      headers: {
-        Authorization: `Bearer ${token}`,
-      },
+      credentials: "include",
     }
   )
 
@@ -211,9 +204,7 @@ const handleDeleteChat = async (
 
   if (!confirmed) return
 
-  const token = localStorage.getItem("token")
-
-  if (!token) {
+  if (!isLoggedIn()) {
     alert("Your session has expired. Please login again.")
     return
   }
@@ -223,9 +214,7 @@ const handleDeleteChat = async (
       `${API_BASE_URL}/api/chat/conversations/${chatId}`,
       {
         method: "DELETE",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+        credentials: "include",
       }
     )
 
@@ -287,16 +276,15 @@ bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
 const saveMessage = async (
 conversationId: number,
 sender: "user" | "ai",
-message: string,
-token: string
+message: string
 ) => {
 const res = await fetch(
 `${API_BASE_URL}/api/chat/conversations/${conversationId}/messages`,
 {
 method: "POST",
+credentials: "include",
 headers: {
 "Content-Type": "application/json",
-Authorization: `Bearer ${token}`,
 },
 body: JSON.stringify({
 sender,
@@ -319,9 +307,7 @@ return data
 const sendMessage = async (text: string) => {
 if (!text.trim()) return
 
-const token = localStorage.getItem("token")
-
-if (!token) {
+if (!isLoggedIn()) {
   alert("Please login again.")
   return
 }
@@ -362,9 +348,9 @@ try {
       `${API_BASE_URL}/api/chat/conversations`,
       {
         method: "POST",
+        credentials: "include",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           title: text.trim().slice(0, 60) || "New Legal Case",
@@ -388,16 +374,15 @@ try {
     await saveMessage(
       currentConversationId,
       "user",
-      text,
-      token
+      text
     )
   }
 
   const res = await fetch(`${API_BASE_URL}/analyze`, {
     method: "POST",
+    credentials: "include",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
     },
     body: JSON.stringify({
       case: text,
@@ -435,8 +420,7 @@ try {
     await saveMessage(
       currentConversationId,
       "ai",
-      aiResponse,
-      token
+      aiResponse
     )
   }
 
@@ -987,9 +971,6 @@ audioBlob: Blob
 setTranscribing(true)
 
 try {
-  const token =
-    localStorage.getItem('token')
-
   const formData = new FormData()
 
   formData.append(
@@ -1008,9 +989,7 @@ try {
     `${API_BASE_URL}/api/voice/stt`,
     {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
+      credentials: 'include',
       body: formData,
     }
   )
@@ -1122,18 +1101,14 @@ if (voiceEngine === 'browser') {
 setLoadingSpeechId(messageId)
 
 try {
-  const token =
-    localStorage.getItem('token')
-
   const res = await fetch(
     `${API_BASE_URL}/api/voice/tts`,
     {
       method: 'POST',
+      credentials: 'include',
       headers: {
         'Content-Type':
           'application/json',
-        Authorization:
-          `Bearer ${token}`,
       },
       body: JSON.stringify({
         text: speechText,

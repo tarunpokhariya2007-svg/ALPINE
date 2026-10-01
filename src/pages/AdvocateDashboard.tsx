@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
+import { getStoredUser, setStoredUser } from '../lib/auth'
 import {
   Calendar,
   Users,
@@ -52,36 +53,7 @@ interface DashboardStats {
 // API
 // =====================================================
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
-
-
-// =====================================================
-// GET STORED USER
-// =====================================================
-
-function getStoredUser(): User | null {
-
-  try {
-
-    const value =
-      localStorage.getItem('user')
-
-    if (!value) {
-      return null
-    }
-
-    return JSON.parse(value)
-
-  } catch (error) {
-
-    console.error(
-      'Unable to read user:',
-      error
-    )
-
-    return null
-  }
-}
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 
 // =====================================================
@@ -107,20 +79,6 @@ function getUserName(
       ''
     )
     .trim()
-}
-
-
-// =====================================================
-// GET TOKEN
-// =====================================================
-
-function getToken() {
-
-  return (
-    localStorage.getItem(
-      'token'
-    ) || ''
-  )
 }
 
 
@@ -174,10 +132,7 @@ export default function AdvocateDashboard() {
 
         try {
 
-          const token =
-            getToken()
-
-          if (!token) {
+          if (!getStoredUser()) {
 
             setLoading(false)
 
@@ -190,11 +145,9 @@ export default function AdvocateDashboard() {
               `${API_URL}/api/profile`,
               {
                 method: 'GET',
+                credentials: 'include',
 
                 headers: {
-                  Authorization:
-                    `Bearer ${token}`,
-
                   'Content-Type':
                     'application/json',
                 },
@@ -230,12 +183,7 @@ export default function AdvocateDashboard() {
             // Keep localStorage
             // synchronized.
 
-            localStorage.setItem(
-              'user',
-              JSON.stringify(
-                data.user
-              )
-            )
+            setStoredUser(data.user)
           }
 
         } catch (error) {
@@ -270,10 +218,7 @@ export default function AdvocateDashboard() {
 
         try {
 
-          const token =
-            getToken()
-
-          if (!token) {
+          if (!getStoredUser()) {
             return
           }
 

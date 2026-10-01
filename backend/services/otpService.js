@@ -7,15 +7,53 @@ const {
 } = require("../database/otpModel");
 
 const { sendOtpEmail, sendPasswordResetOtpEmail } = require("./mailerService");
+const crypto = require("crypto");
 
 const OTP_TTL_MINUTES = 10;
 const RESEND_COOLDOWN_SECONDS = 45;
 const MAX_ATTEMPTS = 5;
 
+// Dedicated secret for hashing OTPs at rest. Falls back to
+// JWT_SECRET (with a distinct HMAC label) if a dedicated
+// secret isn't configured, so existing deployments keep
+// working without a required env change — but setting
+// OTP_HASH_SECRET explicitly is recommended.
+const OTP_HASH_SECRET = process.env.OTP_HASH_SECRET || `${process.env.JWT_SECRET}:otp`;
+
 
 function generateOtpCode() {
-    // 6-digit numeric code, always zero-padded
-    return String(Math.floor(100000 + Math.random() * 900000));
+    // 6-digit numeric code, always zero-padded.
+    // Uses crypto.randomInt (CSPRNG) instead of Math.random(),
+    // which is not safe for security-sensitive codes.
+    return String(crypto.randomInt(100000, 1000000));
+}
+
+
+// The OTP is only ever kept in memory for the brief window
+// between generation and sending the email. The database
+// stores only this HMAC hash, never the plaintext code.
+function hashOtpCode(code) {
+    return crypto
+        .createHmac("sha256", OTP_HASH_SECRET)
+        .update(String(code))
+        .digest("hex");
+}
+
+
+function otpHashesMatch(submittedCode, storedHash) {
+    const submittedHash = hashOtpCode(submittedCode);
+
+    const a = Buffer.from(submittedHash, "hex");
+    const b = Buffer.from(String(storedHash), "hex");
+
+    if (a.length !== b.length) {
+        return false;
+    }
+
+    // Timing-safe comparison — avoids leaking information
+    // about how many leading characters matched via response
+    // timing.
+    return crypto.timingSafeEqual(a, b);
 }
 
 
@@ -51,7 +89,7 @@ async function createAndSendOtp(email, purpose = "signup") {
 
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-    await upsertOtp(email, otpCode, purpose, expiresAt);
+    await upsertOtp(email, hashOtpCode(otpCode), purpose, expiresAt);
 
     await sendOtpEmail(email, otpCode, purpose);
 
@@ -86,7 +124,7 @@ async function createAndSendPasswordResetOtp(email, role = "citizen") {
     const otpCode = generateOtpCode();
     const expiresAt = new Date(Date.now() + OTP_TTL_MINUTES * 60 * 1000);
 
-    await upsertOtp(email, otpCode, purpose, expiresAt);
+    await upsertOtp(email, hashOtpCode(otpCode), purpose, expiresAt);
     await sendPasswordResetOtpEmail(email, otpCode, role);
 
     return { expiresInMinutes: OTP_TTL_MINUTES };
@@ -119,7 +157,7 @@ async function verifyOtpCode(email, purpose, submittedCode) {
         throw err;
     }
 
-    if (String(row.otp_code) !== String(submittedCode)) {
+    if (!otpHashesMatch(submittedCode, row.otp_hash)) {
 
         await incrementOtpAttempts(email, purpose);
 

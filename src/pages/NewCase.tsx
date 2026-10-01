@@ -1,5 +1,6 @@
 import { FormEvent, useState } from 'react'
 import { useNavigate } from 'react-router'
+import { isLoggedIn } from '../lib/auth'
 import {
   ArrowLeft,
   Briefcase,
@@ -9,7 +10,7 @@ import {
   Loader2,
 } from 'lucide-react'
 
-const API_BASE = 'https://legal-ai-z7vb.onrender.com'
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 const categories = [
   'General Legal Matter',
@@ -49,9 +50,7 @@ export default function NewCase() {
       return
     }
 
-    const token = localStorage.getItem('token')
-
-    if (!token) {
+    if (!isLoggedIn()) {
       alert('Please login again.')
       navigate('/login')
       return
@@ -62,9 +61,9 @@ export default function NewCase() {
 
       const response = await fetch(`${API_BASE}/api/cases`, {
         method: 'POST',
+        credentials: 'include',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
         },
         body: JSON.stringify({
           title: title.trim(),

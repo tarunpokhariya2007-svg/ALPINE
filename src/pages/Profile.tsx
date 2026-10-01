@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLocation } from 'react-router'
+import { isLoggedIn, setStoredUser } from '../lib/auth'
 import {
   Camera,
   Edit2,
@@ -17,7 +18,7 @@ import {
 // BACKEND URL
 // =====================================================
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 
 // =====================================================
@@ -137,18 +138,14 @@ export default function Profile() {
 
     try {
 
-      const token =
-        localStorage.getItem('token')
-
-
       // -----------------------------------------------
-      // IF THERE IS NO TOKEN
+      // IF THERE IS NO USER SESSION
       // -----------------------------------------------
 
-      if (!token) {
+      if (!isLoggedIn()) {
 
         console.warn(
-          'No login token found'
+          'No login session found'
         )
 
         loadFromLocalStorage()
@@ -168,11 +165,9 @@ export default function Profile() {
           `${API_URL}/api/profile`,
           {
             method: 'GET',
+            credentials: 'include',
 
             headers: {
-              Authorization:
-                `Bearer ${token}`,
-
               'Content-Type':
                 'application/json',
             },
@@ -205,12 +200,7 @@ export default function Profile() {
         // KEEP LOCAL STORAGE UPDATED
         // ---------------------------------------------
 
-        localStorage.setItem(
-          'user',
-          JSON.stringify(
-            data.user
-          )
-        )
+        setStoredUser(data.user)
 
       } else {
 
@@ -419,15 +409,11 @@ export default function Profile() {
 
   const handleSaveProfile = async () => {
 
-    const token =
-      localStorage.getItem('token')
-
-
     // -----------------------------------------------
     // CHECK LOGIN
     // -----------------------------------------------
 
-    if (!token) {
+    if (!isLoggedIn()) {
 
       alert(
         'Your login session has expired. Please login again.'
@@ -483,14 +469,12 @@ export default function Profile() {
           `${API_URL}/api/profile`,
           {
             method: 'PUT',
+            credentials: 'include',
 
             headers: {
 
               'Content-Type':
                 'application/json',
-
-              Authorization:
-                `Bearer ${token}`,
 
             },
 
@@ -565,12 +549,7 @@ export default function Profile() {
       // SAVE TO LOCAL STORAGE
       // -----------------------------------------------
 
-      localStorage.setItem(
-        'user',
-        JSON.stringify(
-          updatedUser
-        )
-      )
+      setStoredUser(updatedUser)
 
 
       // -----------------------------------------------

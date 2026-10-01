@@ -93,13 +93,11 @@ export default function AdvocateAvailability() {
   const [apiError, setApiError] = useState('')
   const [blockSaving, setBlockSaving] = useState(false)
 
-  const API_URL = 'https://legal-ai-z7vb.onrender.com'
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
   const authHeaders = () => {
-    const token = localStorage.getItem('token')
     return {
       'Content-Type': 'application/json',
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
     }
   }
 
@@ -115,6 +113,7 @@ export default function AdvocateAvailability() {
       const response = await fetch(
         `${API_URL}/api/availability?month=${monthValue}`,
         {
+          credentials: 'include',
           headers: authHeaders(),
         },
       )
@@ -285,6 +284,7 @@ export default function AdvocateAvailability() {
             `${API_URL}/api/availability/blocks/${fullDayBlock.id}`,
             {
               method: 'DELETE',
+              credentials: 'include',
               headers: authHeaders(),
             },
           )
@@ -304,6 +304,7 @@ export default function AdvocateAvailability() {
       } else {
         const response = await fetch(`${API_URL}/api/availability/blocks`, {
           method: 'POST',
+          credentials: 'include',
           headers: authHeaders(),
           body: JSON.stringify({
             blockDate: selectedDate,
@@ -344,6 +345,7 @@ export default function AdvocateAvailability() {
     try {
       const response = await fetch(`${API_URL}/api/availability/blocks`, {
         method: 'POST',
+        credentials: 'include',
         headers: authHeaders(),
         body: JSON.stringify({
           blockDate: selectedDate,
@@ -396,6 +398,7 @@ export default function AdvocateAvailability() {
         `${API_URL}/api/availability/blocks/${id}`,
         {
           method: 'DELETE',
+          credentials: 'include',
           headers: authHeaders(),
         },
       )
@@ -436,6 +439,7 @@ export default function AdvocateAvailability() {
 
       const response = await fetch(`${API_URL}/api/availability`, {
         method: 'PUT',
+        credentials: 'include',
         headers: authHeaders(),
         body: JSON.stringify({ availability }),
       })

@@ -1,6 +1,8 @@
+import { ensureCsrfToken } from '../lib/csrf'
 import { useEffect, useState } from 'react'
 import { Link, useLocation, useNavigate } from 'react-router'
 import { useGoogleLogin } from '@react-oauth/google'
+import { setStoredUser } from '../lib/auth'
 import {
   Mail,
   Lock,
@@ -443,7 +445,7 @@ By creating an account and using NyayaAI, you acknowledge that you have read, un
 // BACKEND URL
 // =====================================================
 
-const API_URL = 'https://legal-ai-z7vb.onrender.com'
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
 
 // =====================================================
 // MAIN LOGIN COMPONENT
@@ -497,6 +499,7 @@ export default function Login() {
   const [forgotStep, setForgotStep] = useState<'email' | 'otp' | 'password'>('email')
   const [forgotEmail, setForgotEmail] = useState('')
   const [forgotOtp, setForgotOtp] = useState('')
+  const [forgotResetToken, setForgotResetToken] = useState('')
   const [forgotPassword, setForgotPassword] = useState('')
   const [forgotConfirmPassword, setForgotConfirmPassword] = useState('')
   const [forgotLoading, setForgotLoading] = useState(false)
@@ -557,6 +560,7 @@ export default function Login() {
     setForgotStep('email')
     setForgotEmail(email.trim())
     setForgotOtp('')
+    setForgotResetToken('')
     setForgotPassword('')
     setForgotConfirmPassword('')
     setForgotError('')
@@ -589,6 +593,7 @@ export default function Login() {
       const res = await fetch(`${API_URL}/api/auth/forgot-password/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           email: forgotEmail.trim(),
           role,
@@ -632,6 +637,7 @@ export default function Login() {
       const res = await fetch(`${API_URL}/api/auth/forgot-password/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           email: forgotEmail.trim(),
           otp: forgotOtp.trim(),
@@ -645,6 +651,7 @@ export default function Login() {
         throw new Error(data.message || 'Incorrect verification code.')
       }
 
+      setForgotResetToken(data.resetToken || '')
       setForgotStep('password')
       setForgotMessage('Code verified. Create your new password below.')
     } catch (err) {
@@ -680,10 +687,12 @@ export default function Login() {
       const res = await fetch(`${API_URL}/api/auth/forgot-password/reset`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           email: forgotEmail.trim(),
           newPassword: forgotPassword,
           role,
+          resetToken: forgotResetToken,
         }),
       })
 
@@ -696,6 +705,7 @@ export default function Login() {
       setForgotMessage('Password changed successfully. You can now sign in.')
       setForgotPassword('')
       setForgotConfirmPassword('')
+      setForgotResetToken('')
 
       setTimeout(() => {
         setForgotOpen(false)
@@ -730,6 +740,7 @@ export default function Login() {
       const res = await fetch(`${API_URL}${endpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: email.trim(), password }),
       })
 
@@ -739,8 +750,8 @@ export default function Login() {
         throw new Error(data.message || 'Login failed.')
       }
 
-      localStorage.setItem('token', data.token)
-localStorage.setItem('user', JSON.stringify(data.user))
+      setStoredUser(data.user)
+      await ensureCsrfToken(true)
 
 const redirectTo = (location.state as { from?: string } | null)?.from
 
@@ -776,6 +787,7 @@ if (redirectTo && redirectTo.startsWith('/')) {
       const res = await fetch(`${API_URL}/api/auth/signup/send-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: email.trim() }),
       })
 
@@ -817,6 +829,7 @@ if (redirectTo && redirectTo.startsWith('/')) {
       const res = await fetch(`${API_URL}/api/auth/signup/verify-otp`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: email.trim(), otp: otp.trim() }),
       })
 
@@ -859,6 +872,7 @@ if (redirectTo && redirectTo.startsWith('/')) {
       const res = await fetch(`${API_URL}/api/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           fullName: name.trim(),
           email: email.trim(),
@@ -882,14 +896,15 @@ if (redirectTo && redirectTo.startsWith('/')) {
       const loginRes = await fetch(`${API_URL}${loginEndpoint}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({ email: email.trim(), password }),
       })
 
       const loginData = await loginRes.json()
 
       if (loginRes.ok && loginData.success) {
-        localStorage.setItem('token', loginData.token)
-        localStorage.setItem('user', JSON.stringify(loginData.user))
+        setStoredUser(loginData.user)
+        await ensureCsrfToken(true)
       }
 
       const redirectTo = (location.state as { from?: string } | null)?.from
@@ -949,6 +964,7 @@ if (redirectTo && redirectTo.startsWith('/')) {
         const res = await fetch(`${API_URL}/api/auth/google`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             accessToken: tokenResponse.access_token,
             role: requestedRole,
@@ -994,11 +1010,8 @@ if (redirectTo && redirectTo.startsWith('/')) {
         }
 
         // Save the session only after the role has been verified.
-        localStorage.setItem('token', data.token)
-        localStorage.setItem(
-          'user',
-          JSON.stringify(data.user)
-        )
+        setStoredUser(data.user)
+        await ensureCsrfToken(true)
 
         const redirectTo = (
           location.state as { from?: string } | null

@@ -29,8 +29,12 @@ async function speechToText(fileBuffer, filename = "audio.webm", languageCode = 
     });
 
     if (!res.ok) {
-        const errText = await res.text();
-        throw new Error(`Sarvam STT failed (${res.status}): ${errText}`);
+        // Consume the body but don't include it in the thrown error —
+        // the STT route only logs err.message server-side, and the
+        // raw provider response isn't needed for that; the status
+        // code is enough to diagnose a failed call.
+        await res.text();
+        throw new Error(`Sarvam STT failed (${res.status})`);
     }
 
     const data = await res.json();
@@ -74,9 +78,12 @@ async function textToSpeech(
   });
 
   if (!res.ok) {
+    // Don't log the raw provider response body: it can echo back part
+    // of the requested text or other provider-internal detail. The
+    // status code is enough for server-side debugging.
     const errText = await res.text();
-    console.error("SARVAM TTS RESPONSE:", errText);
-    throw new Error(`Sarvam TTS failed (${res.status}): ${errText}`);
+    console.error("SARVAM TTS FAILED:", res.status);
+    throw new Error(`Sarvam TTS failed (${res.status})`);
   }
 
   const data = await res.json();
