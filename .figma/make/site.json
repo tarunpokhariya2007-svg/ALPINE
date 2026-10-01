@@ -1,0 +1,11 @@
+{
+  "title": "Nyaya AI — AI Legal Guidance in India",
+  "description": "Provides instant AI-driven legal guidance and connects users with recommended advocates by analyzing case details and uploaded documents.",
+  "robots": {
+    "index": true
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
