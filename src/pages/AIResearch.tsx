@@ -14,8 +14,7 @@ import {
   MessageSquare,
   ShieldCheck,
 } from 'lucide-react'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import AnimatedMarkdown from '../components/AnimatedMarkdown'
 
 interface ResearchMessage {
   id: string
@@ -90,6 +89,7 @@ export default function AIResearch() {
 
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
+  const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
   const [uploading, setUploading] = useState(false)
 
   const [chatHistory, setChatHistory] =
@@ -287,6 +287,22 @@ export default function AIResearch() {
     uploading,
   ])
 
+  useEffect(() => {
+    if (!streamingMessageId) return
+
+    const message = messages.find(message => message.id === streamingMessageId)
+    if (!message) {
+      setStreamingMessageId(null)
+      return
+    }
+
+    const timeout = window.setTimeout(() => {
+      setStreamingMessageId(null)
+    }, Math.max(450, Math.min(3500, message.content.length * 2.5)))
+
+    return () => window.clearTimeout(timeout)
+  }, [messages, streamingMessageId])
+
   /*
    * Make sure a conversation exists before
    * sending a message or uploading a document.
@@ -377,14 +393,18 @@ export default function AIResearch() {
       /*
        * Display the actual AI answer.
        */
+      const aiMessageId = `ai-${Date.now()}`
+
       setMessages(prev => [
         ...prev,
         {
-          id: `ai-${Date.now()}`,
+          id: aiMessageId,
           role: 'ai',
           content: data.message,
         },
       ])
+
+      setStreamingMessageId(aiMessageId)
 
       /*
        * Refresh sidebar history so the
@@ -496,14 +516,18 @@ export default function AIResearch() {
        * Backend returns the actual
        * document-analysis response.
        */
+      const analysisMessageId = `analysis-${Date.now()}`
+
       setMessages(prev => [
         ...prev,
         {
-          id: `analysis-${Date.now()}`,
+          id: analysisMessageId,
           role: 'ai',
           content: data.message,
         },
       ])
+
+      setStreamingMessageId(analysisMessageId)
 
       await loadChats()
     } catch (error) {
@@ -1366,15 +1390,10 @@ export default function AIResearch() {
                 >
                   {msg.role ===
                   'ai' ? (
-                    <ReactMarkdown
-                      remarkPlugins={[
-                        remarkGfm,
-                      ]}
-                    >
-                      {
-                        msg.content
-                      }
-                    </ReactMarkdown>
+                    <AnimatedMarkdown
+                      content={String(msg.content ?? '')}
+                      animate={msg.id === streamingMessageId}
+                    />
                   ) : (
                     <div
                       style={{

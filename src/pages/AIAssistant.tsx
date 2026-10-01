@@ -2,8 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { Link } from 'react-router'
 import { isLoggedIn } from '../lib/auth'
 import jsPDF from 'jspdf'
-import ReactMarkdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
+import AnimatedMarkdown from '../components/AnimatedMarkdown'
 import {
 Send, Mic, Square, Paperclip, RotateCcw, Scale, FileText, Users,
 Clock, ChevronRight, Sparkles, MessageSquare, Plus, X, Volume2, Loader2,
@@ -81,6 +80,7 @@ minute: '2-digit'
 ])
 const [input, setInput] = useState('')
 const [loading, setLoading] = useState(false)
+const [streamingMessageId, setStreamingMessageId] = useState<string | null>(null)
 const [agentStep, setAgentStep] = useState("")
 const [conversationId, setConversationId] = useState<number | null>(null)
 const activeChat = conversationId?.toString() || ''
@@ -272,6 +272,22 @@ loadConversations()
 useEffect(() => {
 bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
 }, [messages, loading])
+
+useEffect(() => {
+  if (!streamingMessageId) return
+
+  const message = messages.find(message => message.id === streamingMessageId)
+  if (!message) {
+    setStreamingMessageId(null)
+    return
+  }
+
+  const timeout = window.setTimeout(() => {
+    setStreamingMessageId(null)
+  }, Math.max(450, Math.min(3500, message.content.length * 2.5)))
+
+  return () => window.clearTimeout(timeout)
+}, [messages, streamingMessageId])
 const saveMessage = async (
 conversationId: number,
 sender: "user" | "ai",
@@ -414,6 +430,7 @@ try {
   }
 
   setMessages(prev => [...prev, aiMsg])
+  setStreamingMessageId(aiMsg.id)
 
   if (currentConversationId !== null) {
     await saveMessage(
@@ -1659,15 +1676,10 @@ border: '1px solid var(--border)'
 
                 {msg.role === 'ai' ? (
 
-                  <ReactMarkdown
-                    remarkPlugins={[
-                      remarkGfm
-                    ]}
-                  >
-                    {String(
-                      msg.content ?? ''
-                    )}
-                  </ReactMarkdown>
+                  <AnimatedMarkdown
+                    content={String(msg.content ?? '')}
+                    animate={msg.id === streamingMessageId}
+                  />
 
                 ) : (
 
