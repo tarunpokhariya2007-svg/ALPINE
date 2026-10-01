@@ -7,7 +7,15 @@ Nyaya AI is a full-stack legal-tech platform designed to help citizens access le
 The platform combines **Artificial Intelligence, cybersecurity, blockchain-based document integrity, secure authentication, and administrative controls** into a unified legal-tech application.
 
 ---
+## 🚀 Live Agent API
 
+POST https://legal-ai-z7vb.onrender.com/api/agent
+
+### Request
+
+{
+  "message": "Describe your legal issue here"
+}
 ## 🚀 Key Features
 
 ### 🤖 AI Legal Assistant
