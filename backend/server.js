@@ -133,6 +133,7 @@ const meetingRoutes = require("./routes/meetingRoutes");
 const signalingRoutes = require("./routes/signalingRoutes");
 const researchRoutes = require("./routes/researchRoutes");
 const searchRoutes = require("./routes/searchRoutes");
+const agentRoutes = require("./routes/agentRoutes");
 
 // =====================================================
 // MIDDLEWARE / AGENTS
@@ -482,6 +483,15 @@ app.use(
 app.use(
     "/api/search",
     searchRoutes
+);
+
+// -----------------------------------------------------
+// BharatAgentic Standalone AI Agent
+// -----------------------------------------------------
+
+app.use(
+    "/api/agent",
+    agentRoutes
 );
 
 // =====================================================
