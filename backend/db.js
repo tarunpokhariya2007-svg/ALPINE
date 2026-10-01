@@ -2,6 +2,10 @@ const mysql = require("mysql2/promise");
 const {
     ensureAuditLogsTable
 } = require("./database/auditLogModel");
+
+const {
+    ensureLegalKnowledgeTable
+} = require("./database/legalKnowledgeModel");
 console.log("Database connection initialized.");
 
 const pool = mysql.createPool({
@@ -228,6 +232,7 @@ async function initializeDatabaseTables() {
     await initializeAppointmentsTable();
     await initializeConsultationMeetingsTable();
     await initializeMeetingEndRequestsTable();
+    await ensureLegalKnowledgeTable(pool);
 }
 
 initializeDatabaseTables();

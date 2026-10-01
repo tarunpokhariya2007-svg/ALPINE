@@ -6,31 +6,58 @@ const bcrypt = require("bcrypt");
 
 const db = require("../db");
 const authMiddleware = require("../middleware/authMiddleware");
+
 const {
     hashDocument,
     anchorHashOnChain,
     verifyHashOnChain,
-    isBlockchainEnabled,
+    isBlockchainEnabled
 } = require("../services/blockchainService");
+
 const { getNetworkName } = require("../utils/blockchainConfig");
+
 const {
     setBlockchainRegistration,
-    getDocumentForBlockchain,
+    getDocumentForBlockchain
 } = require("../database/documentHashModel");
-const { logDocumentActivity } = require("../database/auditLogModel");
+
+const {
+    logDocumentActivity
+} = require("../database/auditLogModel");
+
+const {
+    createDocumentStoragePath,
+    toStorageReference,
+    isSupabaseStorageReference,
+    uploadDocumentBuffer,
+    downloadDocumentBuffer,
+    deleteDocumentFromStorage
+} = require("../services/supabaseStorageService");
 
 const router = express.Router();
 
-const UPLOAD_DIR = path.join(__dirname, "..", "uploads");
-const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB per file
+/* =========================================================
+   CONFIGURATION
+========================================================= */
 
-// Make sure the upload directory exists
+const UPLOAD_DIR =
+    process.env.UPLOAD_DIR ||
+    path.join(__dirname, "..", "uploads");
+
+const MAX_FILE_SIZE = 10 * 1024 * 1024;
+
+/*
+ * Keep legacy local storage available for old documents.
+ * New uploads are stored in Supabase Storage.
+ */
 if (!fs.existsSync(UPLOAD_DIR)) {
-    fs.mkdirSync(UPLOAD_DIR, { recursive: true });
+    fs.mkdirSync(UPLOAD_DIR, {
+        recursive: true
+    });
 }
 
 /* =========================================================
-   ALLOWED FILE TYPES
+   ALLOWED MIME TYPES
 ========================================================= */
 
 const ALLOWED_MIME_TYPES = new Set([
@@ -55,35 +82,10 @@ const ALLOWED_MIME_TYPES = new Set([
 ]);
 
 /* =========================================================
-   MULTER STORAGE
+   MULTER
 ========================================================= */
 
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, UPLOAD_DIR);
-    },
-
-    filename: function (req, file, cb) {
-        const extension = path.extname(file.originalname);
-
-        const safeExtension =
-            extension && extension.length <= 20
-                ? extension.toLowerCase()
-                : "";
-
-        const uniqueName =
-            Date.now() +
-            "-" +
-            Math.round(Math.random() * 1e9) +
-            safeExtension;
-
-        cb(null, uniqueName);
-    }
-});
-
-/* =========================================================
-   MULTER CONFIGURATION
-========================================================= */
+const storage = multer.memoryStorage();
 
 const upload = multer({
     storage,
@@ -93,7 +95,7 @@ const upload = multer({
         files: 1
     },
 
-    fileFilter: function (req, file, cb) {
+    fileFilter(req, file, cb) {
         if (!ALLOWED_MIME_TYPES.has(file.mimetype)) {
             return cb(
                 new Error(
@@ -107,29 +109,31 @@ const upload = multer({
 });
 
 /* =========================================================
-   MAGIC-BYTE / FILE-SIGNATURE VALIDATION
-
-   SECURITY FIX:
-   multer's fileFilter above only checks the MIME type the
-   BROWSER reported for the upload (the multipart Content-Type
-   part). That value is fully attacker-controlled — a client
-   can rename a script or executable, set Content-Type to
-   "application/pdf", and it would previously pass this check
-   untouched.
-
-   This checks the file's actual leading bytes against the
-   known signatures for every type we claim to support, so a
-   mislabeled/malicious file is rejected and removed even
-   though multer already wrote it to disk.
+   FILE SIGNATURE VALIDATION
 ========================================================= */
 
-function matchesSignature(buffer, signature, offset = 0) {
-    if (buffer.length < offset + signature.length) {
+function matchesSignature(
+    buffer,
+    signature,
+    offset = 0
+) {
+    if (
+        !Buffer.isBuffer(buffer) ||
+        buffer.length <
+            offset + signature.length
+    ) {
         return false;
     }
 
-    for (let i = 0; i < signature.length; i++) {
-        if (buffer[offset + i] !== signature[i]) {
+    for (
+        let i = 0;
+        i < signature.length;
+        i++
+    ) {
+        if (
+            buffer[offset + i] !==
+            signature[i]
+        ) {
             return false;
         }
     }
@@ -137,56 +141,170 @@ function matchesSignature(buffer, signature, offset = 0) {
     return true;
 }
 
-function fileSignatureMatchesMimeType(buffer, mimetype) {
+function fileSignatureMatchesMimeType(
+    buffer,
+    mimetype
+) {
     switch (mimetype) {
         case "application/pdf":
-            return matchesSignature(buffer, [0x25, 0x50, 0x44, 0x46]); // %PDF
+            return matchesSignature(
+                buffer,
+                [
+                    0x25,
+                    0x50,
+                    0x44,
+                    0x46
+                ]
+            );
 
         case "image/png":
             return matchesSignature(
                 buffer,
-                [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+                [
+                    0x89,
+                    0x50,
+                    0x4e,
+                    0x47,
+                    0x0d,
+                    0x0a,
+                    0x1a,
+                    0x0a
+                ]
             );
 
         case "image/jpeg":
         case "image/jpg":
-            return matchesSignature(buffer, [0xff, 0xd8, 0xff]);
+            return matchesSignature(
+                buffer,
+                [
+                    0xff,
+                    0xd8,
+                    0xff
+                ]
+            );
 
         case "image/webp":
             return (
-                matchesSignature(buffer, [0x52, 0x49, 0x46, 0x46]) &&
-                matchesSignature(buffer, [0x57, 0x45, 0x42, 0x50], 8)
+                matchesSignature(
+                    buffer,
+                    [
+                        0x52,
+                        0x49,
+                        0x46,
+                        0x46
+                    ]
+                ) &&
+                matchesSignature(
+                    buffer,
+                    [
+                        0x57,
+                        0x45,
+                        0x42,
+                        0x50
+                    ],
+                    8
+                )
             );
 
         case "image/gif":
             return (
-                matchesSignature(buffer, [0x47, 0x49, 0x46, 0x38, 0x37, 0x61]) ||
-                matchesSignature(buffer, [0x47, 0x49, 0x46, 0x38, 0x39, 0x61])
+                matchesSignature(
+                    buffer,
+                    [
+                        0x47,
+                        0x49,
+                        0x46,
+                        0x38,
+                        0x37,
+                        0x61
+                    ]
+                ) ||
+                matchesSignature(
+                    buffer,
+                    [
+                        0x47,
+                        0x49,
+                        0x46,
+                        0x38,
+                        0x39,
+                        0x61
+                    ]
+                )
             );
 
         case "audio/mpeg":
         case "audio/mp3":
             return (
-                matchesSignature(buffer, [0x49, 0x44, 0x33]) ||
-                matchesSignature(buffer, [0xff, 0xfb]) ||
-                matchesSignature(buffer, [0xff, 0xf3]) ||
-                matchesSignature(buffer, [0xff, 0xf2])
+                matchesSignature(
+                    buffer,
+                    [
+                        0x49,
+                        0x44,
+                        0x33
+                    ]
+                ) ||
+                matchesSignature(
+                    buffer,
+                    [0xff, 0xfb]
+                ) ||
+                matchesSignature(
+                    buffer,
+                    [0xff, 0xf3]
+                ) ||
+                matchesSignature(
+                    buffer,
+                    [0xff, 0xf2]
+                )
             );
 
         case "audio/wav":
         case "audio/x-wav":
-            return matchesSignature(buffer, [0x52, 0x49, 0x46, 0x46]);
+            return (
+                matchesSignature(
+                    buffer,
+                    [
+                        0x52,
+                        0x49,
+                        0x46,
+                        0x46
+                    ]
+                ) &&
+                matchesSignature(
+                    buffer,
+                    [
+                        0x57,
+                        0x41,
+                        0x56,
+                        0x45
+                    ],
+                    8
+                )
+            );
 
         case "audio/mp4":
         case "audio/x-m4a":
         case "video/mp4":
         case "video/quicktime":
-            return matchesSignature(buffer, [0x66, 0x74, 0x79, 0x70], 4);
+            return matchesSignature(
+                buffer,
+                [
+                    0x66,
+                    0x74,
+                    0x79,
+                    0x70
+                ],
+                4
+            );
 
         case "video/webm":
             return matchesSignature(
                 buffer,
-                [0x1a, 0x45, 0xdf, 0xa3]
+                [
+                    0x1a,
+                    0x45,
+                    0xdf,
+                    0xa3
+                ]
             );
 
         default:
@@ -194,21 +312,26 @@ function fileSignatureMatchesMimeType(buffer, mimetype) {
     }
 }
 
-async function verifyUploadedFileSignature(req, res, next) {
+async function verifyUploadedFileSignature(
+    req,
+    res,
+    next
+) {
     if (!req.file) {
         return next();
     }
 
     try {
-        const handle = await fs.promises.open(req.file.path, "r");
-        const headerBuffer = Buffer.alloc(16);
+        const headerBuffer =
+            req.file.buffer.subarray(0, 16);
 
-        await handle.read(headerBuffer, 0, 16, 0);
-        await handle.close();
+        const valid =
+            fileSignatureMatchesMimeType(
+                headerBuffer,
+                req.file.mimetype
+            );
 
-        if (!fileSignatureMatchesMimeType(headerBuffer, req.file.mimetype)) {
-            fs.unlink(req.file.path, () => {});
-
+        if (!valid) {
             return res.status(400).json({
                 success: false,
                 message:
@@ -218,26 +341,33 @@ async function verifyUploadedFileSignature(req, res, next) {
 
         next();
     } catch (error) {
-        console.error("FILE SIGNATURE CHECK ERROR:", error);
-
-        if (req.file && req.file.path) {
-            fs.unlink(req.file.path, () => {});
-        }
+        console.error(
+            "FILE SIGNATURE CHECK ERROR:",
+            error
+        );
 
         return res.status(500).json({
             success: false,
-            message: "Unable to validate uploaded file."
+            message:
+                "Unable to validate uploaded file."
         });
     }
 }
 
 /* =========================================================
-   DOCUMENT PASSWORD MIDDLEWARE
+   DOCUMENT SECURITY PASSWORD
 ========================================================= */
 
-async function documentPasswordMiddleware(req, res, next) {
+async function documentPasswordMiddleware(
+    req,
+    res,
+    next
+) {
     try {
-        const password = req.headers["x-document-password"];
+        const password =
+            req.headers[
+                "x-document-password"
+            ];
 
         if (
             typeof password !== "string" ||
@@ -245,21 +375,26 @@ async function documentPasswordMiddleware(req, res, next) {
         ) {
             return res.status(401).json({
                 success: false,
-                message: "Document Security Password is required."
+                message:
+                    "Document Security Password is required."
             });
         }
 
-        const [rows] = await db.query(
-            `
-            SELECT password_hash
-            FROM document_security
-            WHERE user_id = ?
-            LIMIT 1
-            `,
-            [req.user.id]
-        );
+        const [rows] =
+            await db.query(
+                `
+                SELECT password_hash
+                FROM document_security
+                WHERE user_id = ?
+                LIMIT 1
+                `,
+                [req.user.id]
+            );
 
-        if (!rows || rows.length === 0) {
+        if (
+            !rows ||
+            rows.length === 0
+        ) {
             return res.status(403).json({
                 success: false,
                 message:
@@ -267,15 +402,17 @@ async function documentPasswordMiddleware(req, res, next) {
             });
         }
 
-        const passwordMatches = await bcrypt.compare(
-            password,
-            rows[0].password_hash
-        );
+        const passwordMatches =
+            await bcrypt.compare(
+                password,
+                rows[0].password_hash
+            );
 
         if (!passwordMatches) {
             return res.status(403).json({
                 success: false,
-                message: "Invalid Document Security Password."
+                message:
+                    "Invalid Document Security Password."
             });
         }
 
@@ -295,125 +432,362 @@ async function documentPasswordMiddleware(req, res, next) {
 }
 
 /* =========================================================
-   HELPER: GET SAFE FILE PATH
+   LOCAL FILE PATH
 ========================================================= */
 
-function getPhysicalFilePath(filePath) {
-    if (!filePath) {
+function getPhysicalFilePath(
+    filePath
+) {
+    if (
+        !filePath ||
+        typeof filePath !== "string"
+    ) {
         return null;
     }
 
-    /*
-     * Database normally stores:
-     * /uploads/filename.pdf
-     *
-     * We only use the basename so a database value cannot
-     * escape the uploads directory.
-     */
+    const fileName =
+        path.basename(filePath);
 
-    const fileName = path.basename(filePath);
-
-    if (!fileName) {
+    if (
+        !fileName ||
+        fileName === "." ||
+        fileName === ".."
+    ) {
         return null;
     }
 
-    return path.join(UPLOAD_DIR, fileName);
+    return path.join(
+        UPLOAD_DIR,
+        fileName
+    );
 }
 
 /* =========================================================
-   GET USER DOCUMENTS
+   SUPABASE REFERENCE NORMALIZATION
+
+   Supports:
+
+   1. supabase://documents/...
+   2. documents/...
+   3. https://PROJECT.supabase.co/storage/v1/object/...
 ========================================================= */
 
-router.get(
-    "/documents",
-    authMiddleware,
-    documentPasswordMiddleware,
-    async (req, res) => {
+function normalizeSupabaseReference(
+    filePath
+) {
+    if (
+        !filePath ||
+        typeof filePath !== "string"
+    ) {
+        return null;
+    }
+
+    const value =
+        filePath.trim();
+
+    if (
+        isSupabaseStorageReference(
+            value
+        )
+    ) {
+        return value;
+    }
+
+    /*
+     * Raw Supabase object path.
+     */
+    if (
+        value.startsWith(
+            "documents/"
+        ) &&
+        !value.includes("..")
+    ) {
+        return toStorageReference(
+            value
+        );
+    }
+
+    /*
+     * Full Supabase Storage URL.
+     */
+    if (
+        value.startsWith(
+            "http://"
+        ) ||
+        value.startsWith(
+            "https://"
+        )
+    ) {
         try {
-            const [documents] = await db.query(
-                `
-                SELECT
-                    id,
-                    user_id,
-                    file_name,
-                    file_path,
-                    file_type,
-                    uploaded_at,
-                    document_hash,
-                    blockchain_tx_hash,
-                    blockchain_status
-                FROM documents
-                WHERE user_id = ?
-                ORDER BY uploaded_at DESC
-                `,
-                [req.user.id]
+            const url =
+                new URL(value);
+
+            const marker =
+                "/storage/v1/object/";
+
+            const index =
+                url.pathname.indexOf(
+                    marker
+                );
+
+            if (index < 0) {
+                return null;
+            }
+
+            const remainder =
+                url.pathname.slice(
+                    index +
+                        marker.length
+                );
+
+            const parts =
+                remainder
+                    .split("/")
+                    .filter(Boolean);
+
+            if (parts.length < 2) {
+                return null;
+            }
+
+            const bucket =
+                decodeURIComponent(
+                    parts[0]
+                );
+
+            const configuredBucket =
+                process.env
+                    .SUPABASE_STORAGE_BUCKET ||
+                "nyaya-documents";
+
+            if (
+                bucket !==
+                configuredBucket
+            ) {
+                return null;
+            }
+
+            const objectPath =
+                parts
+                    .slice(1)
+                    .map((part) =>
+                        decodeURIComponent(
+                            part
+                        )
+                    )
+                    .join("/");
+
+            if (
+                !objectPath ||
+                objectPath.includes(
+                    ".."
+                )
+            ) {
+                return null;
+            }
+
+            return toStorageReference(
+                objectPath
             );
-
-            /*
-             * Do NOT expose a publicly accessible /uploads URL.
-             *
-             * The frontend should use:
-             * /api/documents/:id/content
-             * /api/documents/:id/download
-             *
-             * after document-password verification.
-             */
-
-            // Step 6: expose the already-existing blockchain
-            // proof fields (hash, tx hash, status, network name)
-            // so the frontend can render a read-only Blockchain
-            // Proof / Details view. Never expose RPC URLs,
-            // private keys, or any other env/credential values.
-            const safeDocuments = documents.map((document) => ({
-                id: document.id,
-                user_id: document.user_id,
-                file_name: document.file_name,
-                file_type: document.file_type,
-                uploaded_at: document.uploaded_at,
-                document_hash: document.document_hash || null,
-                blockchain_tx_hash: document.blockchain_tx_hash || null,
-                blockchain_status: document.blockchain_status || null,
-                blockchain_network: document.blockchain_tx_hash
-                    ? (getNetworkName() || null)
-                    : null
-            }));
-
-            return res.json({
-                success: true,
-                documents: safeDocuments
-            });
-        } catch (error) {
-            console.error(
-                "GET DOCUMENTS ERROR:",
-                error
-            );
-
-            return res.status(500).json({
-                success: false,
-                message: "Failed to load documents."
-            });
+        } catch {
+            return null;
         }
     }
-);
+
+    return null;
+}
 
 /* =========================================================
-   BLOCKCHAIN REGISTRATION HELPER (Step 3)
+   LOAD DOCUMENT BUFFER
 
-   Attempts to anchor an already-computed document hash on the
-   configured EVM testnet and records the outcome against the
-   document row. Never throws — any blockchain/RPC/config error
-   is logged server-side only and reflected as a safe 'failed'
-   status, so a blockchain problem can never corrupt the
-   document record, block the upload response, or leak
-   sensitive details (RPC URLs, private keys) to the client.
+   THIS IS THE MAIN FIX FOR OPEN/DOWNLOAD.
 
-   Only the document hash + document id are ever sent on-chain
-   (as the transaction's data field via anchorHashOnChain) —
-   never the file itself or any personal information.
+   Supabase is always tried first when the database points
+   to a Supabase object.
+
+   Legacy local files are still supported.
 ========================================================= */
 
-async function registerDocumentOnBlockchain(documentId, documentHash) {
-    if (!isBlockchainEnabled()) {
+async function loadDocumentBuffer(
+    filePath,
+    documentId = null
+) {
+    if (
+        !filePath ||
+        typeof filePath !== "string"
+    ) {
+        const error =
+            new Error(
+                "Document file path is missing."
+            );
+
+        error.code =
+            "DOCUMENT_FILE_PATH_MISSING";
+
+        throw error;
+    }
+
+    const normalizedReference =
+        normalizeSupabaseReference(
+            filePath
+        );
+
+    /*
+     * SUPABASE
+     */
+    if (
+        normalizedReference
+    ) {
+        console.log(
+            "DOCUMENT STORAGE: Loading from Supabase:",
+            normalizedReference
+        );
+
+        try {
+            const buffer =
+                await downloadDocumentBuffer(
+                    normalizedReference
+                );
+
+            if (
+                !Buffer.isBuffer(
+                    buffer
+                ) ||
+                buffer.length === 0
+            ) {
+                throw new Error(
+                    "Supabase returned an empty document."
+                );
+            }
+
+            return buffer;
+        } catch (error) {
+            console.error(
+                "SUPABASE DOCUMENT READ ERROR:",
+                {
+                    documentId,
+                    reference:
+                        normalizedReference,
+                    message:
+                        error.message
+                }
+            );
+
+            throw error;
+        }
+    }
+
+    /*
+     * LEGACY LOCAL FILE
+     */
+    const physicalPath =
+        getPhysicalFilePath(
+            filePath
+        );
+
+    if (
+        !physicalPath ||
+        !fs.existsSync(
+            physicalPath
+        )
+    ) {
+        const error =
+            new Error(
+                "Document file is no longer available."
+            );
+
+        error.code =
+            "DOCUMENT_FILE_NOT_FOUND";
+
+        throw error;
+    }
+
+    console.log(
+        "DOCUMENT STORAGE: Loading legacy local file:",
+        physicalPath
+    );
+
+    const buffer =
+        await fs.promises.readFile(
+            physicalPath
+        );
+
+    if (
+        !Buffer.isBuffer(
+            buffer
+        ) ||
+        buffer.length === 0
+    ) {
+        const error =
+            new Error(
+                "Document file is empty."
+            );
+
+        error.code =
+            "DOCUMENT_FILE_EMPTY";
+
+        throw error;
+    }
+
+    return buffer;
+}
+
+/* =========================================================
+   DELETE STORAGE OBJECT
+========================================================= */
+
+async function deleteStoredDocument(
+    filePath
+) {
+    if (
+        !filePath ||
+        typeof filePath !== "string"
+    ) {
+        return;
+    }
+
+    const normalizedReference =
+        normalizeSupabaseReference(
+            filePath
+        );
+
+    if (
+        normalizedReference
+    ) {
+        await deleteDocumentFromStorage(
+            normalizedReference
+        );
+
+        return;
+    }
+
+    const physicalPath =
+        getPhysicalFilePath(
+            filePath
+        );
+
+    if (
+        physicalPath &&
+        fs.existsSync(
+            physicalPath
+        )
+    ) {
+        await fs.promises.unlink(
+            physicalPath
+        );
+    }
+}
+
+/* =========================================================
+   BLOCKCHAIN REGISTRATION
+========================================================= */
+
+async function registerDocumentOnBlockchain(
+    documentId,
+    documentHash
+) {
+    if (
+        !isBlockchainEnabled()
+    ) {
         return {
             attempted: false,
             status: null,
@@ -422,32 +796,47 @@ async function registerDocumentOnBlockchain(documentId, documentHash) {
     }
 
     try {
-        const anchorResult = await anchorHashOnChain(documentHash);
+        const anchorResult =
+            await anchorHashOnChain(
+                documentHash
+            );
 
-        await setBlockchainRegistration(documentId, {
-            status: "registered",
-            txHash: anchorResult.txHash
-        });
+        await setBlockchainRegistration(
+            documentId,
+            {
+                status: "registered",
+                txHash:
+                    anchorResult.txHash
+            }
+        );
 
         return {
             attempted: true,
             status: "registered",
-            txHash: anchorResult.txHash
+            txHash:
+                anchorResult.txHash
         };
-    } catch (blockchainError) {
+    } catch (
+        blockchainError
+    ) {
         console.error(
-            "BLOCKCHAIN REGISTRATION ERROR (document " + documentId + "):",
+            "BLOCKCHAIN REGISTRATION ERROR:",
             blockchainError.message
         );
 
         try {
-            await setBlockchainRegistration(documentId, {
-                status: "failed",
-                txHash: null
-            });
-        } catch (dbError) {
+            await setBlockchainRegistration(
+                documentId,
+                {
+                    status: "failed",
+                    txHash: null
+                }
+            );
+        } catch (
+            dbError
+        ) {
             console.error(
-                "BLOCKCHAIN STATUS UPDATE ERROR (document " + documentId + "):",
+                "BLOCKCHAIN STATUS UPDATE ERROR:",
                 dbError.message
             );
         }
@@ -461,6 +850,134 @@ async function registerDocumentOnBlockchain(documentId, documentHash) {
 }
 
 /* =========================================================
+   DOCUMENT COUNT
+========================================================= */
+
+router.get(
+    "/documents/count",
+    authMiddleware,
+    async (req, res) => {
+        try {
+            const [rows] =
+                await db.query(
+                    `
+                    SELECT COUNT(*) AS count
+                    FROM documents
+                    WHERE user_id = ?
+                    `,
+                    [req.user.id]
+                );
+
+            return res.json({
+                success: true,
+                count: Number(
+                    rows[0]?.count || 0
+                )
+            });
+        } catch (error) {
+            console.error(
+                "DOCUMENT COUNT ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Unable to load document count."
+            });
+        }
+    }
+);
+
+/* =========================================================
+   GET USER DOCUMENTS
+========================================================= */
+
+router.get(
+    "/documents",
+    authMiddleware,
+    documentPasswordMiddleware,
+    async (req, res) => {
+        try {
+            const [documents] =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        user_id,
+                        file_name,
+                        file_path,
+                        file_type,
+                        uploaded_at,
+                        document_hash,
+                        blockchain_tx_hash,
+                        blockchain_status
+                    FROM documents
+                    WHERE user_id = ?
+                    ORDER BY uploaded_at DESC
+                    `,
+                    [req.user.id]
+                );
+
+            const safeDocuments =
+                documents.map(
+                    (document) => ({
+                        id:
+                            document.id,
+
+                        user_id:
+                            document.user_id,
+
+                        file_name:
+                            document.file_name,
+
+                        file_type:
+                            document.file_type,
+
+                        uploaded_at:
+                            document.uploaded_at,
+
+                        document_hash:
+                            document.document_hash ||
+                            null,
+
+                        blockchain_tx_hash:
+                            document.blockchain_tx_hash ||
+                            null,
+
+                        blockchain_status:
+                            document.blockchain_status ||
+                            null,
+
+                        blockchain_network:
+                            document.blockchain_tx_hash
+                                ? getNetworkName() ||
+                                  null
+                                : null
+                    })
+                );
+
+            return res.json({
+                success: true,
+                documents:
+                    safeDocuments
+            });
+        } catch (error) {
+            console.error(
+                "GET DOCUMENTS ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to load documents."
+            });
+        }
+    }
+);
+
+/* =========================================================
    UPLOAD DOCUMENT
 ========================================================= */
 
@@ -471,104 +988,97 @@ router.post(
     upload.single("document"),
     verifyUploadedFileSignature,
     async (req, res) => {
+        let storageObjectPath =
+            null;
+
+        let externalFileUploaded =
+            false;
+
         try {
             if (!req.file) {
                 return res.status(400).json({
                     success: false,
-                    message: "No file was uploaded."
+                    message:
+                        "No file was uploaded."
                 });
             }
 
-            const fileName = req.file.originalname;
-            const filePath = `/uploads/${req.file.filename}`;
-            const fileType = req.file.mimetype;
+            const fileName =
+                req.file.originalname;
+
+            const fileType =
+                req.file.mimetype;
+
+            const fileBuffer =
+                req.file.buffer;
+
+            const documentHash =
+                hashDocument(
+                    fileBuffer
+                );
 
             /*
-             * DOCUMENT INTEGRITY HASH (Step 2 of the blockchain
-             * integrity foundation):
-             *
-             * Compute the SHA-256 fingerprint of the exact bytes
-             * multer just wrote to disk. This is pure hashing —
-             * no blockchain/RPC/wallet involvement here at all,
-             * so it works whether or not BLOCKCHAIN_ENABLED is set.
-             *
-             * If hashing fails, treat it the same as any other
-             * failed upload: remove the physical file and return
-             * an error, instead of saving a document row with a
-             * missing/incorrect fingerprint.
+             * NEW DOCUMENTS ALWAYS GO TO SUPABASE.
              */
 
-            const fileBuffer = await fs.promises.readFile(
-                req.file.path
-            );
-
-            const documentHash = hashDocument(fileBuffer);
-
-            /*
-             * IMPORTANT:
-             *
-             * Your actual documents table only contains:
-             *
-             * id
-             * user_id
-             * file_name
-             * file_path
-             * file_type
-             * uploaded_at
-             * document_hash (added in Step 2)
-             *
-             * Therefore we DO NOT insert:
-             *
-             * original_name
-             * file_size
-             * mimetype
-             */
-
-            const [result] = await db.query(
-                `
-                INSERT INTO documents
-                (
-                    user_id,
-                    file_name,
-                    file_path,
-                    file_type,
-                    document_hash
-                )
-                VALUES
-                (?, ?, ?, ?, ?)
-                `,
-                [
+            storageObjectPath =
+                createDocumentStoragePath(
                     req.user.id,
-                    fileName,
-                    filePath,
-                    fileType,
+                    fileName
+                );
+
+            const filePath =
+                toStorageReference(
+                    storageObjectPath
+                );
+
+            await uploadDocumentBuffer(
+                fileBuffer,
+                storageObjectPath,
+                fileType
+            );
+
+            externalFileUploaded =
+                true;
+
+            const [result] =
+                await db.query(
+                    `
+                    INSERT INTO documents
+                    (
+                        user_id,
+                        file_name,
+                        file_path,
+                        file_type,
+                        document_hash
+                    )
+                    VALUES
+                    (?, ?, ?, ?, ?)
+                    `,
+                    [
+                        req.user.id,
+                        fileName,
+                        filePath,
+                        fileType,
+                        documentHash
+                    ]
+                );
+
+            const documentId =
+                result.insertId;
+
+            const blockchainResult =
+                await registerDocumentOnBlockchain(
+                    documentId,
                     documentHash
-                ]
-            );
+                );
 
-            const documentId = result.insertId;
-
-            /*
-             * BLOCKCHAIN REGISTRATION (Step 3):
-             *
-             * Only attempted when BLOCKCHAIN_ENABLED=true. This
-             * happens after the document + hash are already safely
-             * stored in MySQL, so a blockchain failure here can
-             * never lose the document or its SHA-256 fingerprint —
-             * it only leaves blockchain_status as 'failed' (instead
-             * of 'registered') for later retry.
-             */
-
-            const blockchainResult = await registerDocumentOnBlockchain(
-                documentId,
-                documentHash
-            );
-
-            // AUDIT LOG (never blocks/breaks the upload response)
             await logDocumentActivity({
                 documentId,
-                userId: req.user.id,
-                action: "document_uploaded",
+                userId:
+                    req.user.id,
+                action:
+                    "document_uploaded",
                 req,
                 metadata: {
                     fileName,
@@ -578,14 +1088,19 @@ router.post(
 
             return res.status(201).json({
                 success: true,
-                message: "Document uploaded successfully.",
+                message:
+                    "Document uploaded successfully.",
                 file: {
-                    id: documentId,
-                    name: fileName,
-                    type: fileType
+                    id:
+                        documentId,
+                    name:
+                        fileName,
+                    type:
+                        fileType
                 },
                 blockchain: {
-                    status: blockchainResult.status
+                    status:
+                        blockchainResult.status
                 }
             });
         } catch (error) {
@@ -594,41 +1109,38 @@ router.post(
                 error
             );
 
-            /*
-             * If the database insert fails after multer has
-             * created the physical file, remove that file.
-             */
-
-            if (req.file && req.file.path) {
+            if (
+                externalFileUploaded &&
+                storageObjectPath
+            ) {
                 try {
-                    if (fs.existsSync(req.file.path)) {
-                        fs.unlinkSync(req.file.path);
-                    }
-                } catch (cleanupError) {
+                    await deleteDocumentFromStorage(
+                        toStorageReference(
+                            storageObjectPath
+                        )
+                    );
+                } catch (
+                    cleanupError
+                ) {
                     console.error(
-                        "UPLOAD CLEANUP ERROR:",
-                        cleanupError
+                        "SUPABASE UPLOAD CLEANUP ERROR:",
+                        cleanupError.message
                     );
                 }
             }
 
             return res.status(500).json({
                 success: false,
-                message: "File upload failed."
+                message:
+                    error.message ||
+                    "File upload failed."
             });
         }
     }
 );
 
 /* =========================================================
-   REGISTER (OR RETRY) BLOCKCHAIN HASH REGISTRATION (Step 3)
-
-   Smallest possible protected endpoint to (re)attempt anchoring
-   an already-stored document's hash on-chain, for documents
-   uploaded while BLOCKCHAIN_ENABLED was false, or whose earlier
-   attempt failed. Does not touch the document file or its hash —
-   only reads the existing document_hash and updates the
-   blockchain_tx_hash / blockchain_status fields.
+   BLOCKCHAIN REGISTER
 ========================================================= */
 
 router.post(
@@ -637,102 +1149,121 @@ router.post(
     documentPasswordMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
-            const document = await getDocumentForBlockchain(
-                documentId,
-                req.user.id
-            );
+            const document =
+                await getDocumentForBlockchain(
+                    documentId,
+                    req.user.id
+                );
 
             if (!document) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
 
-            if (!document.document_hash) {
+            if (
+                !document.document_hash
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Document has no stored hash to register."
+                    message:
+                        "Document has no stored hash to register."
                 });
             }
 
-            if (document.blockchain_status === "registered") {
+            if (
+                document.blockchain_status ===
+                "registered"
+            ) {
                 return res.status(200).json({
                     success: true,
-                    message: "Document is already registered on-chain.",
+                    message:
+                        "Document is already registered on-chain.",
                     blockchain: {
-                        status: document.blockchain_status
+                        status:
+                            document.blockchain_status
                     }
                 });
             }
 
-            if (!isBlockchainEnabled()) {
+            if (
+                !isBlockchainEnabled()
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Blockchain integration is currently disabled."
+                    message:
+                        "Blockchain integration is currently disabled."
                 });
             }
 
-            const blockchainResult = await registerDocumentOnBlockchain(
-                documentId,
-                document.document_hash
-            );
+            const blockchainResult =
+                await registerDocumentOnBlockchain(
+                    documentId,
+                    document.document_hash
+                );
 
-            if (blockchainResult.status !== "registered") {
+            if (
+                blockchainResult.status !==
+                "registered"
+            ) {
                 return res.status(502).json({
                     success: false,
-                    message: "Blockchain registration failed. Please try again later.",
+                    message:
+                        "Blockchain registration failed. Please try again later.",
                     blockchain: {
-                        status: blockchainResult.status
+                        status:
+                            blockchainResult.status
                     }
                 });
             }
 
             return res.json({
                 success: true,
-                message: "Document registered on blockchain.",
+                message:
+                    "Document registered on blockchain.",
                 blockchain: {
-                    status: blockchainResult.status,
-                    txHash: blockchainResult.txHash
+                    status:
+                        blockchainResult.status,
+                    txHash:
+                        blockchainResult.txHash
                 }
             });
         } catch (error) {
             console.error(
-                "BLOCKCHAIN REGISTER ENDPOINT ERROR:",
+                "BLOCKCHAIN REGISTER ERROR:",
                 error
             );
 
             return res.status(500).json({
                 success: false,
-                message: "Failed to register document on blockchain."
+                message:
+                    "Failed to register document on blockchain."
             });
         }
     }
 );
 
 /* =========================================================
-   VERIFY BLOCKCHAIN DOCUMENT INTEGRITY (Step 4)
-
-   READ-ONLY endpoint. Recomputes the SHA-256 hash of the
-   document's CURRENT file on disk (never trusts the value
-   already stored in MySQL) and compares it against the hash
-   that was actually anchored on-chain in the transaction
-   recorded at registration time (Step 3). This is what lets
-   the system detect a document that was swapped/modified on
-   disk after it was registered.
-
-   This endpoint never creates a transaction, never calls
-   anchorHashOnChain(), and never writes to the documents
-   table — it only reads.
+   BLOCKCHAIN VERIFY
 ========================================================= */
 
 router.post(
@@ -741,66 +1272,78 @@ router.post(
     documentPasswordMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
-            /*
-             * Ownership-aware fetch: only ever returns a row when
-             * this document belongs to req.user.id, exactly like
-             * the existing /blockchain/register route. A caller
-             * cannot verify another user's document by changing
-             * the :id — they simply get 404, the same response
-             * they'd get for a non-existent document id.
-             */
-
-            const document = await getDocumentForBlockchain(
-                documentId,
-                req.user.id
-            );
+            const document =
+                await getDocumentForBlockchain(
+                    documentId,
+                    req.user.id
+                );
 
             if (!document) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
 
-            /*
-             * No confirmed on-chain registration to check against.
-             */
-
             if (
-                document.blockchain_status !== "registered" ||
+                document.blockchain_status !==
+                    "registered" ||
                 !document.blockchain_tx_hash
             ) {
-                // AUDIT LOG (never blocks/breaks the verify response)
                 await logDocumentActivity({
                     documentId,
-                    userId: req.user.id,
-                    action: "blockchain_verified",
+                    userId:
+                        req.user.id,
+                    action:
+                        "blockchain_verified",
                     req,
                     metadata: {
-                        status: "not_registered"
+                        status:
+                            "not_registered"
                     }
                 });
 
                 return res.status(200).json({
                     success: true,
-                    status: "not_registered"
+                    status:
+                        "not_registered"
                 });
             }
 
-            const physicalPath = getPhysicalFilePath(
-                document.file_path
-            );
+            let fileBuffer;
 
-            if (!physicalPath || !fs.existsSync(physicalPath)) {
+            try {
+                fileBuffer =
+                    await loadDocumentBuffer(
+                        document.file_path,
+                        documentId
+                    );
+            } catch (
+                storageError
+            ) {
+                console.error(
+                    "BLOCKCHAIN VERIFY FILE READ ERROR:",
+                    storageError.message
+                );
+
                 return res.status(404).json({
                     success: false,
                     message:
@@ -808,68 +1351,43 @@ router.post(
                 });
             }
 
-            /*
-             * Fresh hash of the CURRENT file bytes on disk — never
-             * copied from the document_hash column in MySQL. This
-             * is the only way a post-registration tamper (a file
-             * swapped on disk) can be detected.
-             */
-
-            let currentHash;
-
-            try {
-                const fileBuffer = await fs.promises.readFile(
-                    physicalPath
+            const currentHash =
+                hashDocument(
+                    fileBuffer
                 );
-
-                currentHash = hashDocument(fileBuffer);
-            } catch (readError) {
-                console.error(
-                    "BLOCKCHAIN VERIFY FILE READ ERROR:",
-                    readError
-                );
-
-                return res.status(500).json({
-                    success: false,
-                    message:
-                        "Failed to read document for verification."
-                });
-            }
-
-            /*
-             * Read the hash back from the actual on-chain
-             * transaction. Any RPC/network/config problem here is
-             * caught and reported as 'blockchain_unavailable' —
-             * never as an internal error, and never with the
-             * underlying error message/stack.
-             */
 
             let onChainResult;
 
             try {
-                onChainResult = await verifyHashOnChain(
-                    document.blockchain_tx_hash
-                );
-            } catch (blockchainError) {
+                onChainResult =
+                    await verifyHashOnChain(
+                        document.blockchain_tx_hash
+                    );
+            } catch (
+                blockchainError
+            ) {
                 console.error(
                     "BLOCKCHAIN VERIFY ON-CHAIN ERROR:",
                     blockchainError.message
                 );
 
-                // AUDIT LOG (never blocks/breaks the verify response)
                 await logDocumentActivity({
                     documentId,
-                    userId: req.user.id,
-                    action: "blockchain_verified",
+                    userId:
+                        req.user.id,
+                    action:
+                        "blockchain_verified",
                     req,
                     metadata: {
-                        status: "blockchain_unavailable"
+                        status:
+                            "blockchain_unavailable"
                     }
                 });
 
                 return res.status(200).json({
                     success: true,
-                    status: "blockchain_unavailable"
+                    status:
+                        "blockchain_unavailable"
                 });
             }
 
@@ -878,57 +1396,57 @@ router.post(
                 !onChainResult.found ||
                 !onChainResult.documentHash
             ) {
-                // AUDIT LOG (never blocks/breaks the verify response)
-                await logDocumentActivity({
-                    documentId,
-                    userId: req.user.id,
-                    action: "blockchain_verified",
-                    req,
-                    metadata: {
-                        status: "blockchain_unavailable"
-                    }
-                });
-
                 return res.status(200).json({
                     success: true,
-                    status: "blockchain_unavailable"
+                    status:
+                        "blockchain_unavailable"
                 });
             }
 
-            const onChainHash = String(
-                onChainResult.documentHash
-            ).toLowerCase();
+            const onChainHash =
+                String(
+                    onChainResult.documentHash
+                ).toLowerCase();
 
             const matches =
-                currentHash.toLowerCase() === onChainHash;
+                currentHash.toLowerCase() ===
+                onChainHash;
 
-            // AUDIT LOG (never blocks/breaks the verify response)
             await logDocumentActivity({
                 documentId,
-                userId: req.user.id,
-                action: "blockchain_verified",
+                userId:
+                    req.user.id,
+                action:
+                    "blockchain_verified",
                 req,
                 metadata: {
-                    status: matches ? "verified" : "tampered"
+                    status:
+                        matches
+                            ? "verified"
+                            : "tampered"
                 }
             });
 
             if (matches) {
                 return res.status(200).json({
                     success: true,
-                    status: "verified",
-                    verified: true
+                    status:
+                        "verified",
+                    verified:
+                        true
                 });
             }
 
             return res.status(200).json({
                 success: true,
-                status: "tampered",
-                verified: false
+                status:
+                    "tampered",
+                verified:
+                    false
             });
         } catch (error) {
             console.error(
-                "BLOCKCHAIN VERIFY ENDPOINT ERROR:",
+                "BLOCKCHAIN VERIFY ERROR:",
                 error
             );
 
@@ -942,7 +1460,9 @@ router.post(
 );
 
 /* =========================================================
-   VIEW / OPEN DOCUMENT
+   OPEN / VIEW DOCUMENT
+
+   GET /api/documents/:id/content
 ========================================================= */
 
 router.get(
@@ -951,51 +1471,93 @@ router.get(
     documentPasswordMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
-            const [rows] = await db.query(
-                `
-                SELECT
-                    id,
-                    file_name,
-                    file_path,
-                    file_type
-                FROM documents
-                WHERE id = ?
-                  AND user_id = ?
-                LIMIT 1
-                `,
-                [documentId, req.user.id]
-            );
+            const [rows] =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        file_name,
+                        file_path,
+                        file_type
+                    FROM documents
+                    WHERE id = ?
+                      AND user_id = ?
+                    LIMIT 1
+                    `,
+                    [
+                        documentId,
+                        req.user.id
+                    ]
+                );
 
-            if (!rows || rows.length === 0) {
+            if (
+                !rows ||
+                rows.length === 0
+            ) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
 
-            const document = rows[0];
+            const document =
+                rows[0];
 
-            const physicalPath = getPhysicalFilePath(
-                document.file_path
+            console.log(
+                "OPEN DOCUMENT REQUEST:",
+                {
+                    documentId,
+                    fileName:
+                        document.file_name,
+                    filePath:
+                        document.file_path,
+                    fileType:
+                        document.file_type
+                }
             );
 
-            if (!physicalPath) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Document file path is invalid."
-                });
-            }
+            let fileBuffer;
 
-            if (!fs.existsSync(physicalPath)) {
+            try {
+                fileBuffer =
+                    await loadDocumentBuffer(
+                        document.file_path,
+                        documentId
+                    );
+            } catch (
+                storageError
+            ) {
+                console.error(
+                    "VIEW DOCUMENT STORAGE ERROR:",
+                    {
+                        documentId,
+                        filePath:
+                            document.file_path,
+                        error:
+                            storageError.message,
+                        code:
+                            storageError.code
+                    }
+                );
+
                 return res.status(404).json({
                     success: false,
                     message:
@@ -1009,6 +1571,9 @@ router.get(
                     "application/octet-stream"
             );
 
+            /*
+             * Inline is important for browser viewing.
+             */
             res.setHeader(
                 "Content-Disposition",
                 `inline; filename="${encodeURIComponent(
@@ -1016,18 +1581,29 @@ router.get(
                 )}"`
             );
 
-            // AUDIT LOG (never blocks/breaks the view response)
+            res.setHeader(
+                "Content-Length",
+                String(
+                    fileBuffer.length
+                )
+            );
+
             await logDocumentActivity({
                 documentId,
-                userId: req.user.id,
-                action: "document_viewed",
+                userId:
+                    req.user.id,
+                action:
+                    "document_viewed",
                 req,
                 metadata: {
-                    fileName: document.file_name
+                    fileName:
+                        document.file_name
                 }
             });
 
-            return res.sendFile(physicalPath);
+            return res.send(
+                fileBuffer
+            );
         } catch (error) {
             console.error(
                 "VIEW DOCUMENT ERROR:",
@@ -1036,7 +1612,8 @@ router.get(
 
             return res.status(500).json({
                 success: false,
-                message: "Failed to open document."
+                message:
+                    "Failed to open document."
             });
         }
     }
@@ -1052,51 +1629,72 @@ router.get(
     documentPasswordMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
-            const [rows] = await db.query(
-                `
-                SELECT
-                    id,
-                    file_name,
-                    file_path,
-                    file_type
-                FROM documents
-                WHERE id = ?
-                  AND user_id = ?
-                LIMIT 1
-                `,
-                [documentId, req.user.id]
-            );
+            const [rows] =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        file_name,
+                        file_path,
+                        file_type
+                    FROM documents
+                    WHERE id = ?
+                      AND user_id = ?
+                    LIMIT 1
+                    `,
+                    [
+                        documentId,
+                        req.user.id
+                    ]
+                );
 
-            if (!rows || rows.length === 0) {
+            if (
+                !rows ||
+                rows.length === 0
+            ) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
 
-            const document = rows[0];
+            const document =
+                rows[0];
 
-            const physicalPath = getPhysicalFilePath(
-                document.file_path
-            );
+            let fileBuffer;
 
-            if (!physicalPath) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Document file path is invalid."
-                });
-            }
+            try {
+                fileBuffer =
+                    await loadDocumentBuffer(
+                        document.file_path,
+                        documentId
+                    );
+            } catch (
+                storageError
+            ) {
+                console.error(
+                    "DOWNLOAD DOCUMENT STORAGE ERROR:",
+                    storageError
+                );
 
-            if (!fs.existsSync(physicalPath)) {
                 return res.status(404).json({
                     success: false,
                     message:
@@ -1104,20 +1702,41 @@ router.get(
                 });
             }
 
-            // AUDIT LOG (never blocks/breaks the download response)
             await logDocumentActivity({
                 documentId,
-                userId: req.user.id,
-                action: "document_downloaded",
+                userId:
+                    req.user.id,
+                action:
+                    "document_downloaded",
                 req,
                 metadata: {
-                    fileName: document.file_name
+                    fileName:
+                        document.file_name
                 }
             });
 
-            return res.download(
-                physicalPath,
-                document.file_name
+            res.setHeader(
+                "Content-Type",
+                document.file_type ||
+                    "application/octet-stream"
+            );
+
+            res.setHeader(
+                "Content-Disposition",
+                `attachment; filename="${encodeURIComponent(
+                    document.file_name
+                )}"`
+            );
+
+            res.setHeader(
+                "Content-Length",
+                String(
+                    fileBuffer.length
+                )
+            );
+
+            return res.send(
+                fileBuffer
             );
         } catch (error) {
             console.error(
@@ -1127,7 +1746,8 @@ router.get(
 
             return res.status(500).json({
                 success: false,
-                message: "Failed to download document."
+                message:
+                    "Failed to download document."
             });
         }
     }
@@ -1143,81 +1763,96 @@ router.delete(
     documentPasswordMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
-            const [rows] = await db.query(
-                `
-                SELECT
-                    id,
-                    file_name,
-                    file_path
-                FROM documents
-                WHERE id = ?
-                  AND user_id = ?
-                LIMIT 1
-                `,
-                [documentId, req.user.id]
-            );
+            const [rows] =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        file_name,
+                        file_path
+                    FROM documents
+                    WHERE id = ?
+                      AND user_id = ?
+                    LIMIT 1
+                    `,
+                    [
+                        documentId,
+                        req.user.id
+                    ]
+                );
 
-            if (!rows || rows.length === 0) {
+            if (
+                !rows ||
+                rows.length === 0
+            ) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
 
-            const document = rows[0];
-
-            const physicalPath = getPhysicalFilePath(
-                document.file_path
-            );
+            const document =
+                rows[0];
 
             /*
-             * Delete database record first.
+             * Remove database record first.
              */
-
             await db.query(
                 `
                 DELETE FROM documents
                 WHERE id = ?
                   AND user_id = ?
                 `,
-                [documentId, req.user.id]
+                [
+                    documentId,
+                    req.user.id
+                ]
             );
 
             /*
-             * Then remove physical file.
+             * Then remove physical/Supabase file.
              */
-
-            if (
-                physicalPath &&
-                fs.existsSync(physicalPath)
+            try {
+                await deleteStoredDocument(
+                    document.file_path
+                );
+            } catch (
+                storageError
             ) {
-                try {
-                    fs.unlinkSync(physicalPath);
-                } catch (fileError) {
-                    console.error(
-                        "DELETE PHYSICAL FILE ERROR:",
-                        fileError
-                    );
-                }
+                console.error(
+                    "DELETE DOCUMENT STORAGE ERROR:",
+                    storageError.message
+                );
             }
 
-            // AUDIT LOG (never blocks/breaks the delete response)
             await logDocumentActivity({
                 documentId,
-                userId: req.user.id,
-                action: "document_deleted",
+                userId:
+                    req.user.id,
+                action:
+                    "document_deleted",
                 req,
                 metadata: {
-                    fileName: document.file_name
+                    fileName:
+                        document.file_name
                 }
             });
 
@@ -1234,7 +1869,8 @@ router.delete(
 
             return res.status(500).json({
                 success: false,
-                message: "Failed to delete document."
+                message:
+                    "Failed to delete document."
             });
         }
     }
@@ -1250,16 +1886,27 @@ router.put(
     documentPasswordMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
+
             const newName =
-                typeof req.body?.file_name === "string"
+                typeof req.body
+                    ?.file_name ===
+                "string"
                     ? req.body.file_name.trim()
                     : "";
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
@@ -1271,7 +1918,9 @@ router.put(
                 });
             }
 
-            if (newName.length > 255) {
+            if (
+                newName.length > 255
+            ) {
                 return res.status(400).json({
                     success: false,
                     message:
@@ -1279,12 +1928,10 @@ router.put(
                 });
             }
 
-            /*
-             * Prevent path traversal or directory names
-             * from being stored as the document name.
-             */
-
-            const cleanedName = path.basename(newName);
+            const cleanedName =
+                path.basename(
+                    newName
+                );
 
             if (
                 !cleanedName ||
@@ -1293,36 +1940,55 @@ router.put(
             ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document name."
+                    message:
+                        "Invalid document name."
                 });
             }
 
-            const [result] = await db.query(
-                `
-                UPDATE documents
-                SET file_name = ?
-                WHERE id = ?
-                  AND user_id = ?
-                `,
-                [
-                    cleanedName,
-                    documentId,
-                    req.user.id
-                ]
-            );
+            const [result] =
+                await db.query(
+                    `
+                    UPDATE documents
+                    SET file_name = ?
+                    WHERE id = ?
+                      AND user_id = ?
+                    `,
+                    [
+                        cleanedName,
+                        documentId,
+                        req.user.id
+                    ]
+                );
 
-            if (result.affectedRows === 0) {
+            if (
+                result.affectedRows === 0
+            ) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
+
+            await logDocumentActivity({
+                documentId,
+                userId:
+                    req.user.id,
+                action:
+                    "document_renamed",
+                req,
+                metadata: {
+                    fileName:
+                        cleanedName
+                }
+            });
 
             return res.json({
                 success: true,
                 message:
                     "Document renamed successfully.",
-                file_name: cleanedName
+                file_name:
+                    cleanedName
             });
         } catch (error) {
             console.error(
@@ -1332,69 +1998,15 @@ router.put(
 
             return res.status(500).json({
                 success: false,
-                message: "Failed to rename document."
+                message:
+                    "Failed to rename document."
             });
         }
     }
 );
 
 /* =========================================================
-   MULTER / GENERAL ERROR HANDLER
-========================================================= */
-
-router.use((error, req, res, next) => {
-    console.error(
-        "DOCUMENT ROUTE ERROR:",
-        error
-    );
-
-    if (
-        error instanceof multer.MulterError
-    ) {
-        if (error.code === "LIMIT_FILE_SIZE") {
-            return res.status(413).json({
-                success: false,
-                message:
-                    "File is too large. Maximum allowed size is 10 MB per file."
-            });
-        }
-
-        if (error.code === "LIMIT_FILE_COUNT") {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Only one file can be uploaded at a time."
-            });
-        }
-
-        return res.status(400).json({
-            success: false,
-            message:
-                error.message ||
-                "File upload error."
-        });
-    }
-
-    if (error) {
-        return res.status(400).json({
-            success: false,
-            message:
-                error.message ||
-                "File upload failed."
-        });
-    }
-
-    next();
-});
-
-/* =========================================================
-   GET DOCUMENT AUDIT HISTORY
-   (Audit Trail — Step 3)
-
-   Returns the audit_logs entries recorded for a single
-   document (Steps 1–2 already write these rows via
-   logDocumentActivity()). Read-only: no table is created,
-   altered, or written to here.
+   DOCUMENT AUDIT HISTORY
 ========================================================= */
 
 router.get(
@@ -1402,99 +2014,127 @@ router.get(
     authMiddleware,
     async (req, res) => {
         try {
-            const documentId = Number(req.params.id);
+            const documentId =
+                Number(
+                    req.params.id
+                );
 
-            if (!Number.isInteger(documentId)) {
+            if (
+                !Number.isInteger(
+                    documentId
+                )
+            ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid document ID."
+                    message:
+                        "Invalid document ID."
                 });
             }
 
-            /*
-             * Ownership check — same pattern used by the other
-             * /documents/:id routes above (view/download/delete):
-             * a document only "exists" for this endpoint if it
-             * belongs to the authenticated user.
-             */
+            const [documentRows] =
+                await db.query(
+                    `
+                    SELECT id
+                    FROM documents
+                    WHERE id = ?
+                      AND user_id = ?
+                    LIMIT 1
+                    `,
+                    [
+                        documentId,
+                        req.user.id
+                    ]
+                );
 
-            const [documentRows] = await db.query(
-                `
-                SELECT
-                    id
-                FROM documents
-                WHERE id = ?
-                  AND user_id = ?
-                LIMIT 1
-                `,
-                [documentId, req.user.id]
-            );
-
-            if (!documentRows || documentRows.length === 0) {
+            if (
+                !documentRows ||
+                documentRows.length === 0
+            ) {
                 return res.status(404).json({
                     success: false,
-                    message: "Document not found."
+                    message:
+                        "Document not found."
                 });
             }
 
-            /*
-             * entity_id is matched with a strict "=" against a
-             * concrete integer documentId, so rows written with
-             * documentId: null (e.g. the account-wide document
-             * security password events in documentSecurityRoutes.js)
-             * can never match and never leak into a document's
-             * audit history.
-             */
+            const [auditRows] =
+                await db.query(
+                    `
+                    SELECT
+                        id,
+                        description,
+                        created_at,
+                        ip_address,
+                        user_agent,
+                        metadata
+                    FROM audit_logs
+                    WHERE entity_type = 'document'
+                      AND entity_id = ?
+                    ORDER BY created_at DESC
+                    `,
+                    [documentId]
+                );
 
-            const [auditRows] = await db.query(
-                `
-                SELECT
-                    id,
-                    description,
-                    created_at,
-                    ip_address,
-                    user_agent,
-                    metadata
-                FROM audit_logs
-                WHERE entity_type = 'document'
-                  AND entity_id = ?
-                ORDER BY created_at DESC
-                `,
-                [documentId]
-            );
+            const history =
+                (
+                    auditRows || []
+                ).map(
+                    (row) => {
+                        let parsedMetadata =
+                            null;
 
-            const history = (auditRows || []).map((row) => {
-                let parsedMetadata = null;
-
-                if (row.metadata !== null && row.metadata !== undefined) {
-                    if (typeof row.metadata === "string") {
-                        try {
-                            parsedMetadata = JSON.parse(row.metadata);
-                        } catch (parseError) {
-                            // Malformed/non-JSON metadata — surface
-                            // nothing rather than a broken value.
-                            parsedMetadata = null;
+                        if (
+                            row.metadata !==
+                                null &&
+                            row.metadata !==
+                                undefined
+                        ) {
+                            if (
+                                typeof row.metadata ===
+                                "string"
+                            ) {
+                                try {
+                                    parsedMetadata =
+                                        JSON.parse(
+                                            row.metadata
+                                        );
+                                } catch {
+                                    parsedMetadata =
+                                        null;
+                                }
+                            } else {
+                                parsedMetadata =
+                                    row.metadata;
+                            }
                         }
-                    } else {
-                        // mysql2 already parsed a native JSON column.
-                        parsedMetadata = row.metadata;
-                    }
-                }
 
-                return {
-                    id: row.id,
-                    description: row.description,
-                    created_at: row.created_at,
-                    ip_address: row.ip_address,
-                    user_agent: row.user_agent,
-                    metadata: parsedMetadata
-                };
-            });
+                        return {
+                            id:
+                                row.id,
+
+                            description:
+                                row.description,
+
+                            created_at:
+                                row.created_at,
+
+                            ip_address:
+                                row.ip_address,
+
+                            user_agent:
+                                row.user_agent,
+
+                            metadata:
+                                parsedMetadata
+                        };
+                    }
+                );
 
             return res.json({
                 success: true,
                 documentId,
-                count: history.length,
+                count:
+                    history.length,
                 history
             });
         } catch (error) {
@@ -1511,5 +2151,72 @@ router.get(
         }
     }
 );
+
+/* =========================================================
+   MULTER / ROUTE ERROR HANDLER
+========================================================= */
+
+router.use(
+    (
+        error,
+        req,
+        res,
+        next
+    ) => {
+        console.error(
+            "DOCUMENT ROUTE ERROR:",
+            error
+        );
+
+        if (
+            error instanceof
+            multer.MulterError
+        ) {
+            if (
+                error.code ===
+                "LIMIT_FILE_SIZE"
+            ) {
+                return res.status(413).json({
+                    success: false,
+                    message:
+                        "File is too large. Maximum allowed size is 10 MB per file."
+                });
+            }
+
+            if (
+                error.code ===
+                "LIMIT_FILE_COUNT"
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Only one file can be uploaded at a time."
+                });
+            }
+
+            return res.status(400).json({
+                success: false,
+                message:
+                    error.message ||
+                    "File upload error."
+            });
+        }
+
+        if (error) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    error.message ||
+                    "File upload failed."
+            });
+        }
+
+        next();
+    }
+);
+
+/* =========================================================
+   EXPORT
+========================================================= */
 
 module.exports = router;

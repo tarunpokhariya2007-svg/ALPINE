@@ -14,6 +14,7 @@ import {
   Copy,
   ExternalLink,
   Clock,
+  Share2,
 } from "lucide-react";
 
 interface Doc {
@@ -32,6 +33,33 @@ interface Doc {
 // Audit Trail (Step 4) — one entry returned by
 // GET /api/documents/:id/audit. Read-only, matches the
 // shape already produced by the Step 3 backend endpoint.
+interface DocumentShare {
+  id: number;
+  documentId: number;
+  fileName: string;
+  fileType?: string | null;
+  senderId: number;
+  recipientId: number;
+  senderName?: string | null;
+  senderEmail?: string | null;
+  recipientName?: string | null;
+  recipientEmail?: string | null;
+  shareType: "permanent" | "temporary";
+  durationDays?: number | null;
+  expiresAt?: string | null;
+  status: "pending" | "accepted" | "rejected" | "revoked" | "expired";
+  createdAt: string;
+  acceptedAt?: string | null;
+  rejectedAt?: string | null;
+  revokedAt?: string | null;
+}
+interface ShareRecipient {
+  id: number;
+  name: string;
+  email: string;
+  role: string;
+}
+
 interface AuditLogEntry {
   id: number;
   description: string;
@@ -48,7 +76,8 @@ type ProtectedAction =
   | "download"
   | "rename"
   | "delete"
-  | "verify_blockchain";
+  | "verify_blockchain"
+  | "register_blockchain";
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -180,6 +209,53 @@ export default function Documents() {
   const [auditHistory, setAuditHistory] =
     useState<AuditLogEntry[]>([]);
 
+  // =====================================================
+  // DOCUMENT SHARING STATE (Step 2)
+  // =====================================================
+
+  const [showShareModal, setShowShareModal] =
+    useState(false);
+
+  const [shareDocument, setShareDocument] =
+    useState<Doc | null>(null);
+
+  const [shareType, setShareType] =
+    useState<"permanent" | "temporary">("permanent");
+
+  const [shareDurationDays, setShareDurationDays] =
+    useState<number>(7);
+
+  const [shareRecipients, setShareRecipients] =
+    useState<ShareRecipient[]>([]);
+
+  const [selectedRecipientId, setSelectedRecipientId] =
+    useState<number | null>(null);
+
+  const [shareRecipientsLoading, setShareRecipientsLoading] =
+    useState(false);
+
+  const [shareSubmitting, setShareSubmitting] =
+    useState(false);
+
+  const [shareError, setShareError] =
+    useState<string | null>(null);
+
+  // Shared documents management state.
+  const [incomingShares, setIncomingShares] =
+    useState<DocumentShare[]>([]);
+
+  const [outgoingShares, setOutgoingShares] =
+    useState<DocumentShare[]>([]);
+
+  const [sharesLoading, setSharesLoading] =
+    useState(false);
+
+  const [sharesError, setSharesError] =
+    useState<string | null>(null);
+
+  const [shareActionId, setShareActionId] =
+    useState<number | null>(null);
+
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   // =====================================================
@@ -193,6 +269,613 @@ export default function Documents() {
       setToast(null);
     }, 2500);
   };
+
+  // =====================================================
+  // DOCUMENT SHARING
+  // =====================================================
+
+  const openShareModal = async (doc: Doc) => {
+    if (!doc.id) {
+      showToast("Unable to share this document.");
+      return;
+    }
+
+    if (!isLoggedIn()) {
+      showToast("Please login again.");
+      return;
+    }
+
+    setShareDocument(doc);
+    setShareType("permanent");
+    setShareDurationDays(7);
+    setSelectedRecipientId(null);
+    setShareError(null);
+    setShareRecipients([]);
+    setShowShareModal(true);
+    setShareRecipientsLoading(true);
+
+    try {
+      const response = await fetch(
+        `${API_BASE}/api/document-shares/recipients`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setShareError(
+          result.message ||
+            "Unable to load eligible recipients."
+        );
+        return;
+      }
+
+      setShareRecipients(
+        Array.isArray(result.recipients)
+          ? result.recipients.map((recipient: any) => ({
+              id: Number(recipient.id),
+              name:
+                recipient.name ||
+                recipient.full_name ||
+                "Unknown user",
+              email: recipient.email || "",
+              role: recipient.role || "",
+            }))
+          : []
+      );
+    } catch (error) {
+      console.error(
+        "LOAD SHARE RECIPIENTS ERROR:",
+        error
+      );
+
+      setShareError(
+        "Unable to load eligible recipients."
+      );
+    } finally {
+      setShareRecipientsLoading(false);
+    }
+  };
+
+  const closeShareModal = () => {
+    if (shareSubmitting) {
+      return;
+    }
+
+    setShowShareModal(false);
+    setShareDocument(null);
+    setShareType("permanent");
+    setShareDurationDays(7);
+    setShareRecipients([]);
+    setSelectedRecipientId(null);
+    setShareError(null);
+  };
+
+  const submitDocumentShare = async () => {
+    if (!shareDocument?.id) {
+      setShareError("Document ID is missing.");
+      return;
+    }
+
+    if (!selectedRecipientId) {
+      setShareError(
+        isAdvocate
+          ? "Please select a client."
+          : "Please select an advocate."
+      );
+      return;
+    }
+
+    if (
+      shareType === "temporary" &&
+      (
+        !Number.isInteger(shareDurationDays) ||
+        shareDurationDays < 1 ||
+        shareDurationDays > 365
+      )
+    ) {
+      setShareError(
+        "Temporary sharing must be between 1 and 365 days."
+      );
+      return;
+    }
+
+    try {
+      setShareSubmitting(true);
+      setShareError(null);
+
+      if (!isLoggedIn()) {
+        setShareError("Please login again.");
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            documentId: shareDocument.id,
+            recipientId: selectedRecipientId,
+            shareType,
+            durationDays:
+              shareType === "temporary"
+                ? shareDurationDays
+                : null,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setShareError(
+          result.message ||
+            "Unable to share document."
+        );
+        return;
+      }
+
+      showToast(
+        shareType === "temporary"
+          ? `Document share request sent for ${shareDurationDays} day${shareDurationDays === 1 ? "" : "s"}.`
+          : "Document share request sent."
+      );
+
+      await loadDocumentShares();
+      closeShareModal();
+    } catch (error) {
+      console.error(
+        "DOCUMENT SHARE ERROR:",
+        error
+      );
+
+      setShareError(
+        "Unable to share document. Please try again."
+      );
+    } finally {
+      setShareSubmitting(false);
+    }
+  };
+
+  // =====================================================
+  // SHARED DOCUMENTS MANAGEMENT
+  // =====================================================
+
+  const loadDocumentShares = async () => {
+    try {
+      if (!isLoggedIn()) {
+        return;
+      }
+
+      setSharesLoading(true);
+      setSharesError(null);
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares?_=${Date.now()}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(
+          result.message ||
+            "Unable to load shared documents."
+        );
+      }
+
+      setIncomingShares(
+        Array.isArray(result.incoming)
+          ? result.incoming
+          : []
+      );
+
+      setOutgoingShares(
+        Array.isArray(result.outgoing)
+          ? result.outgoing
+          : []
+      );
+    } catch (error) {
+      console.error(
+        "LOAD DOCUMENT SHARES ERROR:",
+        error
+      );
+
+      setSharesError(
+        error instanceof Error
+          ? error.message
+          : "Unable to load shared documents."
+      );
+    } finally {
+      setSharesLoading(false);
+    }
+  };
+
+  const hasActiveTemporaryShare = (
+    documentId?: number
+  ) => {
+    if (!documentId) {
+      return false;
+    }
+
+    return outgoingShares.some(
+      (share) =>
+        Number(share.documentId) ===
+          Number(documentId) &&
+        share.shareType === "temporary" &&
+        (share.status === "pending" ||
+          share.status === "accepted") &&
+        (
+          !share.expiresAt ||
+          new Date(share.expiresAt).getTime() >
+            Date.now()
+        )
+    );
+  };
+
+  const removeIncomingSharedDocument = async (
+    share: DocumentShare
+  ) => {
+    const confirmed = window.confirm(
+      "Remove this shared document from your Shared Documents list?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setShareActionId(share.id);
+      setSharesError(null);
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares/${share.id}/remove`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        showToast(
+          result.message ||
+            "Unable to remove shared document."
+        );
+        return;
+      }
+
+      showToast(
+        "Shared document removed."
+      );
+
+      await loadDocumentShares();
+    } catch (error) {
+      console.error(
+        "REMOVE SHARED DOCUMENT ERROR:",
+        error
+      );
+
+      showToast(
+        "Unable to remove shared document."
+      );
+    } finally {
+      setShareActionId(null);
+    }
+  };
+
+  const respondToDocumentShare = async (
+    shareId: number,
+    action: "accept" | "reject"
+  ) => {
+    try {
+      setShareActionId(shareId);
+      setSharesError(null);
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares/${shareId}/respond`,
+        {
+          method: "PATCH",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ action }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        showToast(
+          result.message ||
+            `Unable to ${action} document share.`
+        );
+        return;
+      }
+
+      showToast(
+        action === "accept"
+          ? "Document share accepted."
+          : "Document share rejected."
+      );
+
+      await loadDocumentShares();
+    } catch (error) {
+      console.error(
+        "RESPOND DOCUMENT SHARE ERROR:",
+        error
+      );
+
+      showToast(
+        `Unable to ${action} document share.`
+      );
+    } finally {
+      setShareActionId(null);
+    }
+  };
+
+  const revokeDocumentShare = async (
+    shareId: number
+  ) => {
+    const confirmed = window.confirm(
+      "Revoke access to this shared document?"
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      setShareActionId(shareId);
+      setSharesError(null);
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares/${shareId}`,
+        {
+          method: "DELETE",
+          credentials: "include",
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        showToast(
+          result.message ||
+            "Unable to revoke document access."
+        );
+        return;
+      }
+
+      showToast("Document access revoked.");
+
+      await loadDocumentShares();
+    } catch (error) {
+      console.error(
+        "REVOKE DOCUMENT SHARE ERROR:",
+        error
+      );
+
+      showToast(
+        "Unable to revoke document access."
+      );
+    } finally {
+      setShareActionId(null);
+    }
+  };
+
+  const openSharedDocument = async (
+    share: DocumentShare
+  ) => {
+    try {
+      setShareActionId(share.id);
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares/${share.id}/content`,
+        {
+          method: "GET",
+          credentials: "include",
+        }
+      );
+
+      if (!response.ok) {
+        let message =
+          "Unable to open shared document.";
+
+        try {
+          const result = await response.json();
+          message =
+            result.message ||
+            message;
+        } catch {
+          // Response was not JSON.
+        }
+
+        showToast(message);
+        return;
+      }
+
+      const blob = await response.blob();
+      const blobUrl =
+        URL.createObjectURL(blob);
+
+      window.open(
+        blobUrl,
+        "_blank",
+        "noopener,noreferrer"
+      );
+
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, 60000);
+    } catch (error) {
+      console.error(
+        "OPEN SHARED DOCUMENT ERROR:",
+        error
+      );
+
+      showToast(
+        "Unable to open shared document."
+      );
+    } finally {
+      setShareActionId(null);
+    }
+  };
+
+  const downloadSharedDocument = async (
+    share: DocumentShare
+  ) => {
+    if (share.shareType === "temporary") {
+      showToast("Download is not permitted for temporary shares.");
+      return;
+    }
+
+    try {
+      setShareActionId(share.id);
+
+      const response = await fetch(
+        `${API_BASE}/api/document-shares/${share.id}/download`,
+        {
+          method: "GET",
+          credentials: "include",
+        }
+      );
+
+      if (!response.ok) {
+        let message =
+          "Unable to download shared document.";
+
+        try {
+          const result = await response.json();
+          message =
+            result.message ||
+            message;
+        } catch {
+          // Response was not JSON.
+        }
+
+        showToast(message);
+        return;
+      }
+
+      const blob = await response.blob();
+      const blobUrl =
+        URL.createObjectURL(blob);
+
+      const anchor =
+        document.createElement("a");
+
+      anchor.href = blobUrl;
+      anchor.download =
+        share.fileName ||
+        "shared-document";
+
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+
+      setTimeout(() => {
+        URL.revokeObjectURL(blobUrl);
+      }, 60000);
+    } catch (error) {
+      console.error(
+        "DOWNLOAD SHARED DOCUMENT ERROR:",
+        error
+      );
+
+      showToast(
+        "Unable to download shared document."
+      );
+    } finally {
+      setShareActionId(null);
+    }
+  };
+
+  const formatShareDate = (
+    value?: string | null
+  ) => {
+    if (!value) {
+      return "—";
+    }
+
+    const parsed = new Date(value);
+
+    if (Number.isNaN(parsed.getTime())) {
+      return value;
+    }
+
+    return parsed.toLocaleDateString(
+      "en-IN",
+      {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+      }
+    );
+  };
+
+  const getShareStatusStyle = (
+    status: DocumentShare["status"]
+  ) => {
+    switch (status) {
+      case "accepted":
+        return {
+          background:
+            "rgba(34, 197, 94, 0.10)",
+          color: "#22C55E",
+          border:
+            "1px solid rgba(34, 197, 94, 0.22)",
+        };
+
+      case "pending":
+        return {
+          background:
+            "rgba(234, 179, 8, 0.10)",
+          color: "#EAB308",
+          border:
+            "1px solid rgba(234, 179, 8, 0.22)",
+        };
+
+      case "rejected":
+      case "revoked":
+      case "expired":
+        return {
+          background:
+            "rgba(239, 68, 68, 0.08)",
+          color: "#EF4444",
+          border:
+            "1px solid rgba(239, 68, 68, 0.18)",
+        };
+
+      default:
+        return {
+          background:
+            "var(--bg-card)",
+          color:
+            "var(--text-muted)",
+          border:
+            "1px solid var(--border)",
+        };
+    }
+  };
+
+  useEffect(() => {
+    loadDocumentShares();
+  }, []);
 
   // =====================================================
   // CHECK DOCUMENT SECURITY PASSWORD
@@ -291,10 +974,11 @@ export default function Documents() {
       }
 
       const response = await fetch(
-        `${API_BASE}/api/documents`,
+        `${API_BASE}/api/documents?_=${Date.now()}`,
         {
           method: "GET",
           credentials: "include",
+          cache: "no-store",
           headers: {
             "X-Document-Password":
               documentPassword,
@@ -305,6 +989,12 @@ export default function Documents() {
       const result = await response.json();
 
       console.log("SAVED DOCUMENTS:", result);
+      console.log(
+        "DOCUMENT COUNT:",
+        Array.isArray(result.documents)
+          ? result.documents.length
+          : 0
+      );
 
       if (!response.ok || !result.success) {
         console.error(
@@ -426,6 +1116,9 @@ export default function Documents() {
 
       case "verify_blockchain":
         return "verify this document on the blockchain";
+
+      case "register_blockchain":
+        return "register this document on the blockchain";
 
       default:
         return "continue";
@@ -875,6 +1568,15 @@ export default function Documents() {
           );
         }
         break;
+
+      case "register_blockchain":
+        if (pendingDocument) {
+          await performBlockchainRegister(
+            pendingDocument,
+            password
+          );
+        }
+        break;
     }
 
     setProtectedAction(null);
@@ -1058,46 +1760,13 @@ export default function Documents() {
         return;
       }
 
-      const uploadedFile: Doc = {
-        id: result.file?.id,
-
-        name:
-          result.file?.originalName ||
-          file.name,
-
-        size:
-          result.file?.size
-            ? formatFileSize(
-                result.file.size
-              )
-            : formatFileSize(
-                file.size
-              ),
-
-        date:
-          new Date().toLocaleDateString(
-            "en-IN",
-            {
-              day: "numeric",
-              month: "short",
-              year: "numeric",
-            }
-          ),
-
-        type:
-          result.file?.mimetype ||
-          file.type ||
-          "Uploaded",
-
-        url:
-          result.file?.url ||
-          undefined,
-      };
-
-      setDocs((prev) => [
-        uploadedFile,
-        ...prev,
-      ]);
+      // Reload the authoritative list from the backend.
+      // This avoids constructing a partial local document
+      // object and guarantees the list contains every saved
+      // document plus the newly uploaded one.
+      await loadDocuments(
+        documentPassword
+      );
 
       showToast(
         `${file.name} uploaded successfully`
@@ -1213,11 +1882,10 @@ export default function Documents() {
         return;
       }
 
-      setDocs((prev) =>
-        prev.filter(
-          (doc) =>
-            doc.id !== id
-        )
+      // Reload from the backend so the UI always reflects
+      // the database after deletion.
+      await loadDocuments(
+        documentPassword || ""
       );
 
       showToast(
@@ -1325,11 +1993,9 @@ export default function Documents() {
               "X-Document-Password":
                 documentPassword || "",
             },
-
-            body: JSON.stringify({
-              fileName:
-                newName,
-            }),
+body: JSON.stringify({
+  file_name: newName,
+}),
           }
         );
 
@@ -1353,15 +2019,12 @@ export default function Documents() {
         return;
       }
 
-      setDocs((prev) =>
-        prev.map((doc) =>
-          doc.id === id
-            ? {
-                ...doc,
-                name: newName,
-              }
-            : doc
-        )
+      // Reload from the backend after rename instead of only
+      // changing React state. This keeps the UI synchronized
+      // with the database and also restores the complete
+      // document list if the page previously had stale state.
+      await loadDocuments(
+        documentPassword || ""
       );
 
       showToast(
@@ -1614,10 +2277,15 @@ export default function Documents() {
     };
 
   // =====================================================
-  // VERIFY ON BLOCKCHAIN REQUEST
+  // BLOCKCHAIN ACTION REQUEST
+  //
+  // The shield button performs the correct action based on
+  // the current document state:
+  // - registered -> verify the existing on-chain record
+  // - not registered / failed -> register (or retry) the hash
   // =====================================================
 
-  const verifyOnBlockchain = (
+  const handleBlockchainAction = (
     doc: Doc
   ) => {
     if (!doc.id) {
@@ -1628,7 +2296,7 @@ export default function Documents() {
     }
 
     if (verifyingBlockchainId) {
-      // Already verifying a document — ignore
+      // Already processing a document — ignore
       // duplicate clicks.
       return;
     }
@@ -1636,9 +2304,95 @@ export default function Documents() {
     setPendingDocument(doc);
 
     requireDocumentPassword(
-      "verify_blockchain"
+      doc.blockchainStatus === "registered"
+        ? "verify_blockchain"
+        : "register_blockchain"
     );
   };
+
+  // =====================================================
+  // REGISTER ON BLOCKCHAIN AFTER PASSWORD
+  // =====================================================
+
+  const performBlockchainRegister =
+    async (
+      doc: Doc,
+      documentPassword: string
+    ) => {
+      if (!doc.id) {
+        alert(
+          "Document ID not found."
+        );
+        return;
+      }
+
+      try {
+        setVerifyingBlockchainId(
+          doc.id
+        );
+
+        if (!isLoggedIn()) {
+          alert(
+            "Please login again."
+          );
+          return;
+        }
+
+        const response =
+          await fetch(
+            `${API_BASE}/api/documents/${doc.id}/blockchain/register`,
+            {
+              method: "POST",
+
+              credentials: "include",
+
+              headers: {
+                "X-Document-Password":
+                  documentPassword,
+              },
+            }
+          );
+
+        const result =
+          await response.json();
+
+        if (
+          !response.ok ||
+          !result.success
+        ) {
+          showToast(
+            result.message ||
+              "Unable to register document on blockchain."
+          );
+          return;
+        }
+
+        showToast(
+          "✓ Document registered on blockchain"
+        );
+
+        // Refresh the document list so the saved
+        // blockchain status, transaction hash and network
+        // returned by GET /api/documents are immediately
+        // visible in the UI.
+        await loadDocuments(
+          documentPassword
+        );
+      } catch (error) {
+        console.error(
+          "BLOCKCHAIN REGISTER ERROR:",
+          error
+        );
+
+        showToast(
+          "Blockchain registration failed"
+        );
+      } finally {
+        setVerifyingBlockchainId(
+          undefined
+        );
+      }
+    };
 
   // =====================================================
   // VERIFY ON BLOCKCHAIN AFTER PASSWORD
@@ -2450,16 +3204,52 @@ export default function Documents() {
                 />
               </button>
 
-              {/* VERIFY ON BLOCKCHAIN */}
+              {/* SHARE */}
+
+              {!hasActiveTemporaryShare(d.id) && (
+                <>
+              <button
+                title="Share document"
+                onClick={() =>
+                  openShareModal(d)
+                }
+                style={{
+                  padding: 7,
+                  borderRadius: 6,
+                  border:
+                    "1px solid var(--border)",
+                  background:
+                    "var(--bg-card)",
+                  color:
+                    "var(--text-muted)",
+                  cursor:
+                    "pointer",
+                  display:
+                    "flex",
+                }}
+              >
+                <Share2
+                  size={13}
+                />
+              </button>
+
+                </>
+              )}
+
+              {/* BLOCKCHAIN ACTION */}
 
               <button
-                title="Verify on Blockchain"
+                title={
+                  d.blockchainStatus === "registered"
+                    ? "Verify on Blockchain"
+                    : "Register on Blockchain"
+                }
                 disabled={
                   verifyingBlockchainId ===
                   d.id
                 }
                 onClick={() =>
-                  verifyOnBlockchain(d)
+                  handleBlockchainAction(d)
                 }
                 style={{
                   padding: 7,
@@ -2495,7 +3285,7 @@ export default function Documents() {
                 />
                 {verifyingBlockchainId ===
                 d.id
-                  ? "Verifying..."
+                  ? "Processing..."
                   : ""}
               </button>
 
@@ -2617,8 +3407,947 @@ export default function Documents() {
       </div>
 
       {/* =====================================================
+          SHARED DOCUMENTS
+      ===================================================== */}
+
+      <div
+        className="card"
+        style={{
+          marginTop: 20,
+          padding: 18,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: 12,
+            marginBottom: 16,
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "1rem",
+                fontWeight: 800,
+                color: "var(--text)",
+              }}
+            >
+              Shared Documents
+            </h2>
+
+            <div
+              style={{
+                marginTop: 4,
+                fontSize: "0.72rem",
+                color: "var(--text-muted)",
+              }}
+            >
+              Documents you have received and documents you
+              have shared
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={loadDocumentShares}
+            disabled={sharesLoading}
+            style={{
+              padding: "7px 10px",
+              borderRadius: 7,
+              border:
+                "1px solid var(--border)",
+              background:
+                "var(--bg-card)",
+              color:
+                "var(--text-muted)",
+              cursor: sharesLoading
+                ? "not-allowed"
+                : "pointer",
+              fontSize: "0.7rem",
+              opacity: sharesLoading ? 0.6 : 1,
+            }}
+          >
+            {sharesLoading
+              ? "Refreshing..."
+              : "Refresh"}
+          </button>
+        </div>
+
+        {sharesError && (
+          <div
+            style={{
+              marginBottom: 14,
+              padding: "9px 11px",
+              borderRadius: 8,
+              background:
+                "rgba(239, 68, 68, 0.08)",
+              border:
+                "1px solid rgba(239, 68, 68, 0.20)",
+              color: "#EF4444",
+              fontSize: "0.76rem",
+            }}
+          >
+            {sharesError}
+          </div>
+        )}
+
+        {/* -------------------------------------------------
+            SHARED WITH ME
+        ------------------------------------------------- */}
+
+        <div
+          style={{
+            border:
+              "1px solid var(--border)",
+            borderRadius: 10,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "13px 14px",
+              borderBottom:
+                "1px solid var(--border)",
+              background:
+                "var(--bg-card)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.84rem",
+                    fontWeight: 750,
+                    color: "var(--text)",
+                  }}
+                >
+                  Shared With Me
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 3,
+                    fontSize: "0.68rem",
+                    color:
+                      "var(--text-muted)",
+                  }}
+                >
+                  Documents shared with your account
+                </div>
+              </div>
+
+              <span
+                style={{
+                  minWidth: 24,
+                  height: 24,
+                  padding: "0 7px",
+                  borderRadius: 999,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background:
+                    "var(--blue-subtle)",
+                  color:
+                    "var(--blue)",
+                  fontSize: "0.68rem",
+                  fontWeight: 800,
+                }}
+              >
+                {incomingShares.length}
+              </span>
+            </div>
+          </div>
+
+          {sharesLoading &&
+          incomingShares.length === 0 ? (
+            <div
+              style={{
+                padding: 28,
+                textAlign: "center",
+                color:
+                  "var(--text-muted)",
+                fontSize: "0.78rem",
+              }}
+            >
+              Loading shared documents...
+            </div>
+          ) : incomingShares.length ===
+            0 ? (
+            <div
+              style={{
+                padding: 28,
+                textAlign: "center",
+                color:
+                  "var(--text-muted)",
+                fontSize: "0.78rem",
+              }}
+            >
+              No documents have been shared with you.
+            </div>
+          ) : (
+            incomingShares.map(
+              (share, index) => {
+                const statusStyle =
+                  getShareStatusStyle(
+                    share.status
+                  );
+
+                return (
+                  <div
+                    key={share.id}
+                    style={{
+                      padding:
+                        "14px",
+                      borderBottom:
+                        index <
+                        incomingShares.length - 1
+                          ? "1px solid var(--border)"
+                          : "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems:
+                          "flex-start",
+                        justifyContent:
+                          "space-between",
+                        gap: 16,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems:
+                            "flex-start",
+                          gap: 10,
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 8,
+                            flexShrink: 0,
+                            background:
+                              "var(--blue-subtle)",
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            justifyContent:
+                              "center",
+                          }}
+                        >
+                          <FileText
+                            size={15}
+                            style={{
+                              color:
+                                "var(--blue)",
+                            }}
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            minWidth: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize:
+                                "0.82rem",
+                              fontWeight: 650,
+                              color:
+                                "var(--text)",
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                              whiteSpace:
+                                "nowrap",
+                            }}
+                            title={
+                              share.fileName
+                            }
+                          >
+                            {share.fileName}
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize:
+                                "0.68rem",
+                              color:
+                                "var(--text-muted)",
+                            }}
+                          >
+                            Shared by{" "}
+                            <strong>
+                              {share.senderName ||
+                                share.senderEmail ||
+                                "Unknown user"}
+                            </strong>
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: 3,
+                              fontSize:
+                                "0.66rem",
+                              color:
+                                "var(--text-subtle)",
+                            }}
+                          >
+                            {share.shareType ===
+                            "temporary"
+                              ? `Temporary • ${
+                                  share.expiresAt
+                                    ? `Expires ${formatShareDate(
+                                        share.expiresAt
+                                      )}`
+                                    : `${share.durationDays || "—"} day access`
+                                }`
+                              : "Permanent access"}
+                            {" • "}
+                            Shared{" "}
+                            {formatShareDate(
+                              share.createdAt
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems:
+                            "center",
+                          gap: 7,
+                          flexWrap: "wrap",
+                          justifyContent:
+                            "flex-end",
+                        }}
+                      >
+                        <span
+                          style={{
+                            ...statusStyle,
+                            padding:
+                              "4px 8px",
+                            borderRadius:
+                              999,
+                            fontSize:
+                              "0.62rem",
+                            fontWeight: 750,
+                            textTransform:
+                              "capitalize",
+                          }}
+                        >
+                          {share.status}
+                        </span>
+
+                        {share.status ===
+                          "pending" && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={
+                                shareActionId ===
+                                share.id
+                              }
+                              onClick={() =>
+                                respondToDocumentShare(
+                                  share.id,
+                                  "accept"
+                                )
+                              }
+                              style={{
+                                padding:
+                                  "6px 9px",
+                                borderRadius:
+                                  7,
+                                border:
+                                  "1px solid rgba(34, 197, 94, 0.25)",
+                                background:
+                                  "rgba(34, 197, 94, 0.08)",
+                                color:
+                                  "#22C55E",
+                                cursor:
+                                  shareActionId ===
+                                  share.id
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontSize:
+                                  "0.68rem",
+                                fontWeight:
+                                  700,
+                                opacity:
+                                  shareActionId ===
+                                  share.id
+                                    ? 0.55
+                                    : 1,
+                              }}
+                            >
+                              Accept
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={
+                                shareActionId ===
+                                share.id
+                              }
+                              onClick={() =>
+                                respondToDocumentShare(
+                                  share.id,
+                                  "reject"
+                                )
+                              }
+                              style={{
+                                padding:
+                                  "6px 9px",
+                                borderRadius:
+                                  7,
+                                border:
+                                  "1px solid rgba(239, 68, 68, 0.22)",
+                                background:
+                                  "rgba(239, 68, 68, 0.07)",
+                                color:
+                                  "#EF4444",
+                                cursor:
+                                  shareActionId ===
+                                  share.id
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontSize:
+                                  "0.68rem",
+                                fontWeight:
+                                  700,
+                                opacity:
+                                  shareActionId ===
+                                  share.id
+                                    ? 0.55
+                                    : 1,
+                              }}
+                            >
+                              Reject
+                            </button>
+                          </>
+                        )}
+
+                        {share.status ===
+                          "accepted" && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={
+                                shareActionId ===
+                                share.id
+                              }
+                              onClick={() =>
+                                openSharedDocument(
+                                  share
+                                )
+                              }
+                              style={{
+                                padding:
+                                  "6px 9px",
+                                borderRadius:
+                                  7,
+                                border:
+                                  "1px solid var(--border)",
+                                background:
+                                  "var(--bg-card)",
+                                color:
+                                  "var(--text)",
+                                cursor:
+                                  shareActionId ===
+                                  share.id
+                                    ? "not-allowed"
+                                    : "pointer",
+                                fontSize:
+                                  "0.68rem",
+                                fontWeight:
+                                  650,
+                                opacity:
+                                  shareActionId ===
+                                  share.id
+                                    ? 0.55
+                                    : 1,
+                              }}
+                            >
+                              <Eye
+                                size={12}
+                                style={{
+                                  verticalAlign:
+                                    "middle",
+                                  marginRight: 4,
+                                }}
+                              />
+                              Open
+                            </button>
+
+                            {share.shareType ===
+                              "permanent" && (
+                              <button
+                                type="button"
+                                disabled={
+                                  shareActionId ===
+                                  share.id
+                                }
+                                onClick={() =>
+                                  downloadSharedDocument(
+                                    share
+                                  )
+                                }
+                                style={{
+                                  padding:
+                                    "6px 9px",
+                                  borderRadius:
+                                    7,
+                                  border:
+                                    "1px solid var(--border)",
+                                  background:
+                                    "var(--bg-card)",
+                                  color:
+                                    "var(--text)",
+                                  cursor:
+                                    shareActionId ===
+                                    share.id
+                                      ? "not-allowed"
+                                      : "pointer",
+                                  fontSize:
+                                    "0.68rem",
+                                  fontWeight:
+                                    650,
+                                  opacity:
+                                    shareActionId ===
+                                    share.id
+                                      ? 0.55
+                                      : 1,
+                                }}
+                              >
+                                <Download
+                                  size={12}
+                                  style={{
+                                    verticalAlign:
+                                      "middle",
+                                    marginRight: 4,
+                                  }}
+                                />
+                                Download
+                              </button>
+                            )}
+                          </>
+                        )}
+
+                        {(share.status ===
+                            "accepted" ||
+                            share.status ===
+                              "pending") && (
+                          <button
+                            type="button"
+                            title="Remove shared document"
+                            disabled={
+                              shareActionId ===
+                              share.id
+                            }
+                            onClick={() =>
+                              removeIncomingSharedDocument(
+                                share
+                              )
+                            }
+                            style={{
+                              padding:
+                                "6px 9px",
+                              borderRadius:
+                                7,
+                              border:
+                                "1px solid rgba(239, 68, 68, 0.22)",
+                              background:
+                                "rgba(239, 68, 68, 0.07)",
+                              color:
+                                "#EF4444",
+                              cursor:
+                                shareActionId ===
+                                share.id
+                                  ? "not-allowed"
+                                  : "pointer",
+                              display:
+                                "flex",
+                              alignItems:
+                                "center",
+                              justifyContent:
+                                "center",
+                              fontSize:
+                                "0.68rem",
+                              fontWeight:
+                                700,
+                              opacity:
+                                shareActionId ===
+                                share.id
+                                  ? 0.55
+                                  : 1,
+                            }}
+                          >
+                            <Trash2
+                              size={12}
+                            />
+                          </button>
+                        )}
+
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+            )
+          )}
+        </div>
+
+        {/* -------------------------------------------------
+            SHARED BY ME
+        ------------------------------------------------- */}
+
+        <div
+          style={{
+            marginTop: 14,
+            border:
+              "1px solid var(--border)",
+            borderRadius: 10,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            style={{
+              padding: "13px 14px",
+              borderBottom:
+                "1px solid var(--border)",
+              background:
+                "var(--bg-card)",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "0.84rem",
+                    fontWeight: 750,
+                    color: "var(--text)",
+                  }}
+                >
+                  Shared By Me
+                </div>
+
+                <div
+                  style={{
+                    marginTop: 3,
+                    fontSize: "0.68rem",
+                    color:
+                      "var(--text-muted)",
+                  }}
+                >
+                  Documents you have shared with others
+                </div>
+              </div>
+
+              <span
+                style={{
+                  minWidth: 24,
+                  height: 24,
+                  padding: "0 7px",
+                  borderRadius: 999,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  background:
+                    "var(--blue-subtle)",
+                  color:
+                    "var(--blue)",
+                  fontSize: "0.68rem",
+                  fontWeight: 800,
+                }}
+              >
+                {outgoingShares.length}
+              </span>
+            </div>
+          </div>
+
+          {sharesLoading &&
+          outgoingShares.length === 0 ? (
+            <div
+              style={{
+                padding: 28,
+                textAlign: "center",
+                color:
+                  "var(--text-muted)",
+                fontSize: "0.78rem",
+              }}
+            >
+              Loading shared documents...
+            </div>
+          ) : outgoingShares.length ===
+            0 ? (
+            <div
+              style={{
+                padding: 28,
+                textAlign: "center",
+                color:
+                  "var(--text-muted)",
+                fontSize: "0.78rem",
+              }}
+            >
+              You have not shared any documents yet.
+            </div>
+          ) : (
+            outgoingShares.map(
+              (share, index) => {
+                const statusStyle =
+                  getShareStatusStyle(
+                    share.status
+                  );
+
+                return (
+                  <div
+                    key={share.id}
+                    style={{
+                      padding:
+                        "14px",
+                      borderBottom:
+                        index <
+                        outgoingShares.length - 1
+                          ? "1px solid var(--border)"
+                          : "none",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems:
+                          "flex-start",
+                        justifyContent:
+                          "space-between",
+                        gap: 16,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems:
+                            "flex-start",
+                          gap: 10,
+                          minWidth: 0,
+                          flex: 1,
+                        }}
+                      >
+                        <div
+                          style={{
+                            width: 34,
+                            height: 34,
+                            borderRadius: 8,
+                            flexShrink: 0,
+                            background:
+                              "var(--blue-subtle)",
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            justifyContent:
+                              "center",
+                          }}
+                        >
+                          <Share2
+                            size={15}
+                            style={{
+                              color:
+                                "var(--blue)",
+                            }}
+                          />
+                        </div>
+
+                        <div
+                          style={{
+                            minWidth: 0,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize:
+                                "0.82rem",
+                              fontWeight: 650,
+                              color:
+                                "var(--text)",
+                              overflow:
+                                "hidden",
+                              textOverflow:
+                                "ellipsis",
+                              whiteSpace:
+                                "nowrap",
+                            }}
+                            title={
+                              share.fileName
+                            }
+                          >
+                            {share.fileName}
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: 4,
+                              fontSize:
+                                "0.68rem",
+                              color:
+                                "var(--text-muted)",
+                            }}
+                          >
+                            Shared with{" "}
+                            <strong>
+                              {share.recipientName ||
+                                share.recipientEmail ||
+                                "Unknown user"}
+                            </strong>
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: 3,
+                              fontSize:
+                                "0.66rem",
+                              color:
+                                "var(--text-subtle)",
+                            }}
+                          >
+                            {share.shareType ===
+                            "temporary"
+                              ? `Temporary • ${
+                                  share.expiresAt
+                                    ? `Expires ${formatShareDate(
+                                        share.expiresAt
+                                      )}`
+                                    : `${share.durationDays || "—"} day access`
+                                }`
+                              : "Permanent access"}
+                            {" • "}
+                            Shared{" "}
+                            {formatShareDate(
+                              share.createdAt
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems:
+                            "center",
+                          gap: 7,
+                          flexWrap: "wrap",
+                          justifyContent:
+                            "flex-end",
+                        }}
+                      >
+                        <span
+                          style={{
+                            ...statusStyle,
+                            padding:
+                              "4px 8px",
+                            borderRadius:
+                              999,
+                            fontSize:
+                              "0.62rem",
+                            fontWeight: 750,
+                            textTransform:
+                              "capitalize",
+                          }}
+                        >
+                          {share.status}
+                        </span>
+
+                        {(share.status ===
+                          "pending" ||
+                          share.status ===
+                            "accepted") && (
+                          <button
+                            type="button"
+                            disabled={
+                              shareActionId ===
+                              share.id
+                            }
+                            onClick={() =>
+                              revokeDocumentShare(
+                                share.id
+                              )
+                            }
+                            style={{
+                              padding:
+                                "6px 9px",
+                              borderRadius:
+                                7,
+                              border:
+                                "1px solid rgba(239, 68, 68, 0.22)",
+                              background:
+                                "rgba(239, 68, 68, 0.07)",
+                              color:
+                                "#EF4444",
+                              cursor:
+                                shareActionId ===
+                                share.id
+                                  ? "not-allowed"
+                                  : "pointer",
+                              fontSize:
+                                "0.68rem",
+                              fontWeight:
+                                700,
+                              opacity:
+                                shareActionId ===
+                                share.id
+                                  ? 0.55
+                                  : 1,
+                            }}
+                          >
+                            {share.status ===
+                            "pending"
+                              ? "Cancel"
+                              : "Revoke"}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+            )
+          )}
+        </div>
+      </div>
+
+      {/* =====================================================
           FIRST-TIME DOCUMENT SECURITY PASSWORD MODAL
       ===================================================== */}
+
 
       {showSetupModal && (
         <div
@@ -3460,6 +5189,482 @@ export default function Documents() {
       )}
 
       {/* =====================================================
+          DOCUMENT SHARE MODAL (Step 2)
+      ===================================================== */}
+
+      {showShareModal &&
+        shareDocument && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 10000,
+              background: "rgba(0, 0, 0, 0.62)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+            }}
+            onClick={closeShareModal}
+          >
+            <div
+              className="card"
+              onClick={(event) =>
+                event.stopPropagation()
+              }
+              style={{
+                width: "100%",
+                maxWidth: 520,
+                maxHeight: "calc(100vh - 40px)",
+                overflowY: "auto",
+                padding: 24,
+                position: "relative",
+              }}
+            >
+              {/* HEADER */}
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: 16,
+                  marginBottom: 20,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 9,
+                      marginBottom: 6,
+                    }}
+                  >
+                    <Share2
+                      size={18}
+                      style={{
+                        color: "var(--blue)",
+                        flexShrink: 0,
+                      }}
+                    />
+
+                    <h2
+                      style={{
+                        margin: 0,
+                        fontSize: "1.1rem",
+                        fontWeight: 800,
+                        color: "var(--text)",
+                      }}
+                    >
+                      Share Document
+                    </h2>
+                  </div>
+
+                  <div
+                    style={{
+                      fontSize: "0.78rem",
+                      color: "var(--text-muted)",
+                      wordBreak: "break-word",
+                    }}
+                  >
+                    {shareDocument.name}
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={closeShareModal}
+                  disabled={shareSubmitting}
+                  aria-label="Close share dialog"
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--text-muted)",
+                    cursor: shareSubmitting
+                      ? "not-allowed"
+                      : "pointer",
+                    display: "flex",
+                    padding: 4,
+                    flexShrink: 0,
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* SHARE TYPE */}
+
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    marginBottom: 9,
+                  }}
+                >
+                  Sharing Type
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 10,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShareType("permanent")
+                    }
+                    disabled={shareSubmitting}
+                    style={{
+                      padding: "12px 10px",
+                      borderRadius: 9,
+                      border:
+                        shareType === "permanent"
+                          ? "1px solid var(--blue)"
+                          : "1px solid var(--border)",
+                      background:
+                        shareType === "permanent"
+                          ? "var(--blue-subtle)"
+                          : "var(--bg-card)",
+                      color: "var(--text)",
+                      cursor: shareSubmitting
+                        ? "not-allowed"
+                        : "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      Permanent Share
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: "0.68rem",
+                        color: "var(--text-muted)",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      Access remains until the
+                      share is revoked.
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setShareType("temporary")
+                    }
+                    disabled={shareSubmitting}
+                    style={{
+                      padding: "12px 10px",
+                      borderRadius: 9,
+                      border:
+                        shareType === "temporary"
+                          ? "1px solid var(--blue)"
+                          : "1px solid var(--border)",
+                      background:
+                        shareType === "temporary"
+                          ? "var(--blue-subtle)"
+                          : "var(--bg-card)",
+                      color: "var(--text)",
+                      cursor: shareSubmitting
+                        ? "not-allowed"
+                        : "pointer",
+                      textAlign: "left",
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontWeight: 700,
+                        fontSize: "0.82rem",
+                      }}
+                    >
+                      Temporary Share
+                    </div>
+
+                    <div
+                      style={{
+                        marginTop: 4,
+                        fontSize: "0.68rem",
+                        color: "var(--text-muted)",
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      Access expires automatically.
+                    </div>
+                  </button>
+                </div>
+              </div>
+
+              {/* TEMPORARY DURATION */}
+
+              {shareType === "temporary" && (
+                <div style={{ marginBottom: 20 }}>
+                  <label
+                    htmlFor="share-duration"
+                    style={{
+                      display: "block",
+                      fontSize: "0.78rem",
+                      fontWeight: 700,
+                      color: "var(--text)",
+                      marginBottom: 8,
+                    }}
+                  >
+                    Access duration
+                  </label>
+
+                  <select
+                    id="share-duration"
+                    value={shareDurationDays}
+                    onChange={(event) =>
+                      setShareDurationDays(
+                        Number(event.target.value)
+                      )
+                    }
+                    disabled={shareSubmitting}
+                    style={{
+                      width: "100%",
+                      padding: "10px 12px",
+                      borderRadius: 8,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-card)",
+                      color: "var(--text)",
+                      outline: "none",
+                    }}
+                  >
+                    <option value={1}>1 day</option>
+                    <option value={3}>3 days</option>
+                    <option value={7}>7 days</option>
+                    <option value={14}>14 days</option>
+                    <option value={30}>30 days</option>
+                    <option value={90}>90 days</option>
+                    <option value={180}>180 days</option>
+                    <option value={365}>365 days</option>
+                  </select>
+                </div>
+              )}
+
+              {/* RECIPIENT */}
+
+              <div style={{ marginBottom: 20 }}>
+                <div
+                  style={{
+                    fontSize: "0.78rem",
+                    fontWeight: 700,
+                    color: "var(--text)",
+                    marginBottom: 9,
+                  }}
+                >
+                  {isAdvocate
+                    ? "Select Client"
+                    : "Select Advocate"}
+                </div>
+
+                {shareRecipientsLoading ? (
+                  <div
+                    style={{
+                      padding: "24px 12px",
+                      borderRadius: 9,
+                      border: "1px solid var(--border)",
+                      color: "var(--text-muted)",
+                      fontSize: "0.78rem",
+                      textAlign: "center",
+                    }}
+                  >
+                    Loading eligible{" "}
+                    {isAdvocate
+                      ? "clients"
+                      : "advocates"}
+                    ...
+                  </div>
+                ) : shareRecipients.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "16px 12px",
+                      borderRadius: 9,
+                      border: "1px solid var(--border)",
+                      background: "var(--bg-card)",
+                      color: "var(--text-muted)",
+                      fontSize: "0.76rem",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    No eligible{" "}
+                    {isAdvocate
+                      ? "clients"
+                      : "advocates"}{" "}
+                    found.
+
+                    <div
+                      style={{
+                        marginTop: 6,
+                        fontSize: "0.68rem",
+                      }}
+                    >
+                      Sharing is available only
+                      with users who have a confirmed
+                      consultation with you.
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 8,
+                      maxHeight: 220,
+                      overflowY: "auto",
+                    }}
+                  >
+                    {shareRecipients.map((recipient) => {
+                      const selected =
+                        selectedRecipientId === recipient.id;
+
+                      return (
+                        <button
+                          key={recipient.id}
+                          type="button"
+                          onClick={() =>
+                            setSelectedRecipientId(
+                              recipient.id
+                            )
+                          }
+                          disabled={shareSubmitting}
+                          style={{
+                            width: "100%",
+                            padding: "11px 12px",
+                            borderRadius: 9,
+                            border: selected
+                              ? "1px solid var(--blue)"
+                              : "1px solid var(--border)",
+                            background: selected
+                              ? "var(--blue-subtle)"
+                              : "var(--bg-card)",
+                            color: "var(--text)",
+                            cursor: shareSubmitting
+                              ? "not-allowed"
+                              : "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontSize: "0.8rem",
+                              fontWeight: 700,
+                            }}
+                          >
+                            {recipient.name}
+                          </div>
+
+                          <div
+                            style={{
+                              marginTop: 3,
+                              fontSize: "0.68rem",
+                              color: "var(--text-muted)",
+                            }}
+                          >
+                            {recipient.email}
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* ERROR */}
+
+              {shareError && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: "10px 12px",
+                    borderRadius: 8,
+                    border: "1px solid rgba(220,38,38,0.3)",
+                    background: "rgba(220,38,38,0.08)",
+                    color: "#ef4444",
+                    fontSize: "0.74rem",
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {shareError}
+                </div>
+              )}
+
+              {/* ACTIONS */}
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: 10,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={closeShareModal}
+                  disabled={shareSubmitting}
+                  style={{
+                    padding: "10px 16px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-card)",
+                    color: "var(--text)",
+                    cursor: shareSubmitting
+                      ? "not-allowed"
+                      : "pointer",
+                  }}
+                >
+                  Cancel
+                </button>
+
+                <button
+                  type="button"
+                  onClick={submitDocumentShare}
+                  disabled={
+                    shareSubmitting ||
+                    !selectedRecipientId ||
+                    shareRecipientsLoading
+                  }
+                  style={{
+                    padding: "10px 18px",
+                    borderRadius: 8,
+                    border: "none",
+                    background:
+                      "linear-gradient(135deg, #F5DD78, #D4AF37)",
+                    color: "#000000",
+                    fontWeight: 800,
+                    cursor:
+                      shareSubmitting || !selectedRecipientId
+                        ? "not-allowed"
+                        : "pointer",
+                    opacity:
+                      shareSubmitting || !selectedRecipientId
+                        ? 0.6
+                        : 1,
+                  }}
+                >
+                  {shareSubmitting
+                    ? "Sharing..."
+                    : "Share Document"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {/* =====================================================
           BLOCKCHAIN PROOF / DETAILS MODAL (Step 6)
       ===================================================== */}
 
@@ -3567,6 +5772,10 @@ export default function Documents() {
 
                 const verifyLabel = (() => {
                   if (!verifyResult) {
+                    if (status !== "registered") {
+                      return "Not registered yet — use \"Register on Blockchain\" to anchor this document hash.";
+                    }
+
                     return "Not checked yet — use \"Verify on Blockchain\" to check.";
                   }
                   switch (verifyResult.status) {
@@ -3737,6 +5946,51 @@ export default function Documents() {
                         {verifyLabel}
                       </div>
                     </div>
+
+                    {status !== "registered" && (
+                      <button
+                        onClick={() => {
+                          const doc =
+                            blockchainDetailsDoc;
+
+                          closeBlockchainDetails();
+                          setPendingDocument(doc);
+
+                          requireDocumentPassword(
+                            "register_blockchain"
+                          );
+                        }}
+                        disabled={
+                          verifyingBlockchainId ===
+                          blockchainDetailsDoc.id
+                        }
+                        style={{
+                          width: "100%",
+                          marginTop: 10,
+                          padding: "9px 14px",
+                          borderRadius: 8,
+                          border:
+                            "1px solid var(--border)",
+                          background:
+                            "var(--bg-card)",
+                          color: "var(--blue)",
+                          fontSize: "0.8rem",
+                          fontWeight: 600,
+                          cursor:
+                            verifyingBlockchainId ===
+                            blockchainDetailsDoc.id
+                              ? "not-allowed"
+                              : "pointer",
+                          opacity:
+                            verifyingBlockchainId ===
+                            blockchainDetailsDoc.id
+                              ? 0.6
+                              : 1,
+                        }}
+                      >
+                        Register on Blockchain
+                      </button>
+                    )}
 
                     {explorerUrl && (
                       <a

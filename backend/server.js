@@ -117,6 +117,7 @@ ensureAuditLogsTable().catch((err) => {
 
 const uploadRoutes = require("./routes/uploadRoutes");
 const documentSecurityRoutes = require("./routes/documentSecurityRoutes");
+const documentShareRoutes = require("./routes/documentShareRoutes");
 const authRoutes = require("./routes/authRoutes");
 const adminRoutes = require("./routes/adminRoutes");
 const managementRoutes = require("./routes/managementRoutes");
@@ -445,6 +446,15 @@ app.use(
 app.use(
     "/api/document-security",
     documentSecurityRoutes
+);
+
+// -----------------------------------------------------
+// Document Sharing
+// -----------------------------------------------------
+
+app.use(
+    "/api/document-shares",
+    documentShareRoutes
 );
 
 // -----------------------------------------------------
