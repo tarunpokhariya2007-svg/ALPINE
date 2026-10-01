@@ -20,6 +20,7 @@ import {
   BookOpen,
   ClipboardList,
   Clock3,
+  Video,
   ChevronRight,
 } from 'lucide-react'
 import { useTheme } from '../../context/ThemeContext'
@@ -28,100 +29,29 @@ import BackButton from './BackButton'
 const isAdvocatePath = (p: string) => p.startsWith('/advocate')
 
 const citizenNav = [
-  {
-    icon: LayoutDashboard,
-    label: 'Dashboard',
-    href: '/dashboard',
-  },
-  {
-    icon: MessageSquare,
-    label: 'AI Assistant',
-    href: '/dashboard/ai-assistant',
-  },
-  {
-    icon: FolderOpen,
-    label: 'My Cases',
-    href: '/dashboard/cases',
-  },
-  {
-    icon: FileText,
-    label: 'Documents',
-    href: '/dashboard/documents',
-  },
-  {
-    icon: Users,
-    label: 'Find Advocates',
-    href: '/dashboard/advocates',
-  },
-  {
-    icon: Calendar,
-    label: 'Your Bookings',
-    href: '/dashboard/bookings',
-  },
-  {
-    icon: Bell,
-    label: 'Notifications',
-    href: '/dashboard/notifications',
-    badge: 3 as number,
-  },
-  {
-    icon: Settings,
-    label: 'Settings',
-    href: '/dashboard/settings',
-  },
+  { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
+  { icon: MessageSquare, label: 'AI Assistant', href: '/dashboard/ai-assistant' },
+  { icon: FolderOpen, label: 'My Cases', href: '/dashboard/cases' },
+  { icon: FileText, label: 'Documents', href: '/dashboard/documents' },
+  { icon: Users, label: 'Find Advocates', href: '/dashboard/advocates' },
+  { icon: Calendar, label: 'Your Bookings', href: '/dashboard/bookings' },
+  { icon: Video, label: 'Meetings', href: '/dashboard/meetings' },
+  { icon: Bell, label: 'Notifications', href: '/dashboard/notifications', badge: 3 as number },
+  { icon: Settings, label: 'Settings', href: '/dashboard/settings' },
 ]
 
 const advocateNav = [
-  {
-    icon: LayoutDashboard,
-    label: 'Dashboard',
-    href: '/advocate',
-  },
-  {
-    icon: Calendar,
-    label: 'Appointments',
-    href: '/advocate/appointments',
-  },
-  {
-    icon: Users,
-    label: 'Clients',
-    href: '/advocate/clients',
-  },
-  {
-    icon: ClipboardList,
-    label: 'Consultation Requests',
-    href: '/advocate/consultation-requests',
-  },
-  {
-    icon: Clock3,
-    label: 'Availability & Timetable',
-    href: '/advocate/availability',
-  },
-  {
-    icon: BookOpen,
-    label: 'AI Research',
-    href: '/advocate/ai-research',
-  },
-  {
-    icon: FileText,
-    label: 'Documents',
-    href: '/advocate/documents',
-  },
-  {
-    icon: DollarSign,
-    label: 'Earnings',
-    href: '/advocate/earnings',
-  },
-  {
-    icon: BarChart2,
-    label: 'Analytics',
-    href: '/advocate/analytics',
-  },
-  {
-    icon: Settings,
-    label: 'Settings',
-    href: '/advocate/settings',
-  },
+  { icon: LayoutDashboard, label: 'Dashboard', href: '/advocate' },
+  { icon: Calendar, label: 'Appointments', href: '/advocate/appointments' },
+  { icon: Users, label: 'Clients', href: '/advocate/clients' },
+  { icon: ClipboardList, label: 'Consultation Requests', href: '/advocate/consultation-requests' },
+  { icon: Video, label: 'Meetings', href: '/advocate/meetings' },
+  { icon: Clock3, label: 'Availability & Timetable', href: '/advocate/availability' },
+  { icon: BookOpen, label: 'AI Research', href: '/advocate/ai-research' },
+  { icon: FileText, label: 'Documents', href: '/advocate/documents' },
+  { icon: DollarSign, label: 'Earnings', href: '/advocate/earnings' },
+  { icon: BarChart2, label: 'Analytics', href: '/advocate/analytics' },
+  { icon: Settings, label: 'Settings', href: '/advocate/settings' },
 ]
 
 export default function DashboardLayout() {

@@ -56,7 +56,10 @@ router.post(
   authMiddleware,
   async (req, res) => {
     try {
-      const title = req.body.title || "New Chat";
+      const title =
+        typeof req.body.title === "string" && req.body.title.trim()
+          ? req.body.title.trim().slice(0, 200)
+          : "New Chat";
 
       const conversationId = await createConversation(
         req.user.id,
@@ -146,12 +149,27 @@ router.post(
     try {
       const conversationId = Number(req.params.id);
 
+      if (
+        !Number.isInteger(conversationId) ||
+        conversationId <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid conversation ID",
+        });
+      }
+
       const {
         sender,
         message,
       } = req.body;
 
-      if (!sender || !message) {
+      if (
+        typeof sender !== "string" ||
+        typeof message !== "string" ||
+        !sender.trim() ||
+        !message.trim()
+      ) {
         return res.status(400).json({
           success: false,
           message: "Sender and message are required",
@@ -212,11 +230,9 @@ router.delete(
   "/conversations/:id",
   authMiddleware,
   async (req, res) => {
-
     let connection;
 
     try {
-
       const conversationId = Number(req.params.id);
       const userId = req.user.id;
 
@@ -300,7 +316,6 @@ router.delete(
         );
 
       if (result.affectedRows === 0) {
-
         await connection.rollback();
 
         return res.status(404).json({
@@ -327,7 +342,6 @@ router.delete(
       });
 
     } catch (err) {
-
       console.error(
         "DELETE CHAT ERROR:",
         err
@@ -344,19 +358,17 @@ router.delete(
         }
       }
 
+      // Do not expose internal database error details
+      // to the client in production.
       res.status(500).json({
         success: false,
-        message:
-          err.message ||
-          "Failed to delete chat",
+        message: "Failed to delete chat",
       });
 
     } finally {
-
       if (connection) {
         connection.release();
       }
-
     }
   }
 );

@@ -1,6 +1,7 @@
 const express = require("express");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+const db = require("../db");
 
 const authMiddleware = require("../middleware/authMiddleware");
 
@@ -28,9 +29,46 @@ const { sendPasswordResetOtpEmail } = require("../services/mailerService");
 
 const router = express.Router();
 
-const JWT_SECRET = "nyaya_secret_key";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+    throw new Error("JWT_SECRET is not configured.");
+}
 
 const SIGNUP_OTP_PURPOSE = "signup";
+
+
+// =====================================================
+// ENSURE LAWYER PROFILE
+// Creates the lawyers row for an advocate if it does
+// not already exist. Returns the lawyers.id.
+// =====================================================
+
+async function ensureLawyerProfile(userId) {
+    const [existing] = await db.query(
+        `
+        SELECT id
+        FROM lawyers
+        WHERE user_id = ?
+        LIMIT 1
+        `,
+        [userId]
+    );
+
+    if (existing.length > 0) {
+        return existing[0].id;
+    }
+
+    const [result] = await db.query(
+        `
+        INSERT INTO lawyers (user_id)
+        VALUES (?)
+        `,
+        [userId]
+    );
+
+    return result.insertId;
+}
 
 
 // =====================================================
@@ -223,6 +261,13 @@ router.post("/signup", async (req, res) => {
                 userRole
             );
 
+        // Every advocate must have a corresponding lawyers profile
+        // so availability, appointments, and advocate profile data
+        // can use the correct lawyers.id.
+        if (userRole === "lawyer") {
+            await ensureLawyerProfile(result.insertId);
+        }
+
         // OTP has served its purpose — remove it so it can't be reused.
         await clearOtp(cleanEmail, SIGNUP_OTP_PURPOSE);
 
@@ -307,6 +352,13 @@ router.post("/google", async (req, res) => {
 
             }
 
+        }
+
+        // Ensure every advocate account, including Google-created
+        // or previously existing Google-linked accounts, has a
+        // corresponding lawyers profile.
+        if (user.role === "lawyer") {
+            await ensureLawyerProfile(user.id);
         }
 
         const token = jwt.sign(

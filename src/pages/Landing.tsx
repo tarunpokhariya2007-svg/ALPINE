@@ -4,15 +4,15 @@ import {
   Scale, ArrowRight, CheckCircle, Shield, Zap, Globe, Lock,
   MessageSquare, Users, FileSearch, MapPin, Mic, ChevronRight,
   Award, Clock, TrendingUp, BookOpen, Crown, Code2, Database,
-  Lightbulb, Target, ShieldCheck, BarChart3,
+  Lightbulb, Target, ShieldCheck, BarChart3,Bot,Languages
 } from 'lucide-react'
 
 const stats = [
-  { value: '48,200+', label: 'Cases Guided', icon: BookOpen },
-  { value: '1,840', label: 'Verified Advocates', icon: Award },
-  { value: '97.4%', label: 'AI Accuracy', icon: TrendingUp },
-  { value: '220+', label: 'Cities Covered', icon: MapPin },
-]
+  { value: '5+', label: 'AI Agents', icon: Bot },
+  { value: '24/7', label: 'AI Assistance', icon: Clock },
+  { value: '8+', label: 'Languages Supported', icon: Languages },
+  { value: 'Secure', label: 'User Data Protection', icon: ShieldCheck },
+];
 
 const steps = [
   {

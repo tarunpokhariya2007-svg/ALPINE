@@ -6,7 +6,7 @@ import remarkGfm from 'remark-gfm'
 import {
 Send, Mic, Square, Paperclip, RotateCcw, Scale, FileText, Users,
 Clock, ChevronRight, Sparkles, MessageSquare, Plus, X, Volume2, Loader2,
-Download,
+Download, Trash2,
 } from 'lucide-react'
 interface Message {
 id: string
@@ -190,6 +190,93 @@ const token = localStorage.getItem("token")
   alert("Failed to load conversation.")
 }
 
+}
+const handleDeleteChat = async (
+  event: React.MouseEvent<HTMLButtonElement>,
+  chatId: string
+) => {
+  event.preventDefault()
+  event.stopPropagation()
+
+  const chat = chatHistory.find(
+    item => String(item.id) === String(chatId)
+  )
+
+  const chatTitle = chat?.title || "this chat"
+
+  const confirmed = window.confirm(
+    `Delete "${chatTitle}"?\n\n` +
+    "This will permanently delete the conversation and its saved messages."
+  )
+
+  if (!confirmed) return
+
+  const token = localStorage.getItem("token")
+
+  if (!token) {
+    alert("Your session has expired. Please login again.")
+    return
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/chat/conversations/${chatId}`,
+      {
+        method: "DELETE",
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      }
+    )
+
+    let data: any = {}
+
+    try {
+      data = await response.json()
+    } catch {
+      data = {}
+    }
+
+    if (!response.ok || !data.success) {
+      throw new Error(
+        data.message || "Failed to delete conversation."
+      )
+    }
+
+    setChatHistory(previous =>
+      previous.filter(
+        item => String(item.id) !== String(chatId)
+      )
+    )
+
+    localStorage.removeItem(`nyaya_case_${chatId}`)
+
+    if (String(conversationId) === String(chatId)) {
+      setConversationId(null)
+      setMessages([
+        {
+          id: "welcome-after-delete-" + Date.now(),
+          role: "ai",
+          content:
+            "The chat was deleted successfully. How can I help you with a new legal matter?",
+          timestamp: new Date().toLocaleTimeString([], {
+            hour: "2-digit",
+            minute: "2-digit",
+          }),
+        },
+      ])
+      setInput("")
+      setFileUploaded(null)
+      setAgentStep("")
+      setLoading(false)
+    }
+  } catch (error: any) {
+    console.error("DELETE CHAT ERROR:", error)
+    alert(
+      error?.message ||
+      "Failed to delete chat. Please try again."
+    )
+  }
 }
 useEffect(() => {
 loadConversations()
@@ -1188,78 +1275,146 @@ border: '1px solid var(--border)'
       }}
     >
 
-      {chatHistory.map(ch => (
-
+      {chatHistory.length === 0 ? (
         <div
-          key={ch.id}
-          onClick={() =>
-            loadConversation(ch.id)
-          }
           style={{
-            padding: '10px 10px',
-            borderRadius: 8,
-            cursor: 'pointer',
-            marginBottom: 2,
-            background:
-              ch.id === activeChat
-                ? 'var(--bg-card)'
-                : 'transparent',
-            border:
-              ch.id === activeChat
-                ? '1px solid var(--border)'
-                : '1px solid transparent',
+            padding: 16,
+            textAlign: 'center',
+            color: 'var(--text-muted)',
+            fontSize: '0.75rem'
           }}
         >
+          No previous chats
+        </div>
+      ) : (
+        chatHistory.map(ch => (
 
           <div
+            key={ch.id}
+            onClick={() =>
+              loadConversation(ch.id)
+            }
             style={{
+              padding: '8px',
+              borderRadius: 8,
+              cursor: 'pointer',
+              marginBottom: 3,
+              background:
+                ch.id === activeChat
+                  ? 'var(--bg-card)'
+                  : 'transparent',
+              border:
+                ch.id === activeChat
+                  ? '1px solid var(--border)'
+                  : '1px solid transparent',
               display: 'flex',
-              alignItems: 'flex-start',
-              gap: 8
+              alignItems: 'center',
+              gap: 6
             }}
           >
 
-            <MessageSquare
-              size={13}
+            <div
               style={{
-                color:
-                  'var(--text-muted)',
-                marginTop: 1,
-                flexShrink: 0
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                flex: 1,
+                minWidth: 0
               }}
-            />
+            >
 
-            <div>
-
-              <div
+              <MessageSquare
+                size={13}
                 style={{
-                  fontSize: '0.78rem',
-                  fontWeight: 500,
-                  color: 'var(--text)',
-                  lineHeight: 1.3
-                }}
-              >
-                {ch.title}
-              </div>
-
-              <div
-                style={{
-                  fontSize: '0.68rem',
                   color:
                     'var(--text-muted)',
-                  marginTop: 2
+                  marginTop: 1,
+                  flexShrink: 0
+                }}
+              />
+
+              <div
+                style={{
+                  minWidth: 0,
+                  flex: 1
                 }}
               >
-                {ch.date}
+
+                <div
+                  style={{
+                    fontSize: '0.78rem',
+                    fontWeight: 500,
+                    color: 'var(--text)',
+                    lineHeight: 1.3,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis'
+                  }}
+                >
+                  {ch.title}
+                </div>
+
+                <div
+                  style={{
+                    fontSize: '0.68rem',
+                    color:
+                      'var(--text-muted)',
+                    marginTop: 2
+                  }}
+                >
+                  {ch.date}
+                </div>
+
               </div>
 
             </div>
 
+            <button
+              type="button"
+              onClick={(event) =>
+                handleDeleteChat(
+                  event,
+                  String(ch.id)
+                )
+              }
+              title="Delete chat"
+              aria-label={`Delete ${ch.title}`}
+              style={{
+                width: 30,
+                height: 30,
+                flexShrink: 0,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                border:
+                  '1px solid rgba(239, 68, 68, 0.25)',
+                borderRadius: 7,
+                background:
+                  'rgba(239, 68, 68, 0.06)',
+                color: '#EF4444',
+                cursor: 'pointer',
+                padding: 0
+              }}
+              onMouseEnter={event => {
+                event.currentTarget.style.background =
+                  'rgba(239, 68, 68, 0.16)'
+                event.currentTarget.style.borderColor =
+                  'rgba(239, 68, 68, 0.5)'
+              }}
+              onMouseLeave={event => {
+                event.currentTarget.style.background =
+                  'rgba(239, 68, 68, 0.06)'
+                event.currentTarget.style.borderColor =
+                  'rgba(239, 68, 68, 0.25)'
+              }}
+            >
+              <Trash2 size={14} />
+            </button>
+
           </div>
 
-        </div>
-
-      ))}
+        ))
+      )}
 
     </div>
 

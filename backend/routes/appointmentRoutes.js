@@ -2,6 +2,7 @@ const express = require("express");
 const db = require("../db");
 const authMiddleware = require("../middleware/authMiddleware");
 const { createNotification } = require("./notificationRoutes");
+const { createMeetingForAppointment, isVideoAppointment } = require("../services/meetingService");
 
 const router = express.Router();
 
@@ -485,6 +486,18 @@ router.patch("/:id/respond", authMiddleware, async (req, res) => {
                 });
             }
 
+            let meeting = null;
+
+            if (isVideoAppointment(appointment.notes)) {
+                try {
+                    meeting = await createMeetingForAppointment(appointmentId);
+                } catch (meetingError) {
+                    console.error("CREATE MEETING AFTER ACCEPT ERROR:", meetingError);
+                    // The appointment remains confirmed. The meeting can be created later
+                    // through POST /api/meetings/:appointmentId/create.
+                }
+            }
+
             await createNotification({
                 userId: appointment.citizen_id,
                 type: "consultation_request_accepted",
@@ -495,10 +508,32 @@ router.patch("/:id/respond", authMiddleware, async (req, res) => {
                 relatedId: appointmentId
             });
 
+            if (meeting) {
+                await createNotification({
+                    userId: appointment.citizen_id,
+                    type: "consultation_meeting_ready",
+                    title: "Video consultation ready",
+                    message:
+                        `Your video consultation with Adv. ${appointment.advocate_name} ` +
+                        `is scheduled for ${appointment.appointment_date} at ${appointment.appointment_time}. ` +
+                        `You can join from the Meetings section 10 minutes before the appointment.`,
+                    relatedId: appointmentId
+                });
+            }
+
             return res.json({
                 success: true,
                 message: "Consultation request accepted.",
-                status: "confirmed"
+                status: "confirmed",
+                meeting: meeting
+                    ? {
+                        id: meeting.id,
+                        appointmentId: appointmentId,
+                        scheduledStart: meeting.scheduled_start,
+                        scheduledEnd: meeting.scheduled_end,
+                        joinUrl: `/meeting/${appointmentId}`
+                    }
+                    : null
             });
         }
 

@@ -1,37 +1,47 @@
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET = "nyaya_secret_key";
+const JWT_SECRET = process.env.JWT_SECRET;
+
+if (!JWT_SECRET) {
+    throw new Error("JWT_SECRET is not configured.");
+}
 
 function authMiddleware(req, res, next) {
     const authHeader = req.headers.authorization;
 
-    console.log("Authorization Header:", authHeader);
-
-    if (!authHeader) {
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
         return res.status(401).json({
             success: false,
-            message: "No token"
+            message: "Authentication required."
         });
     }
 
-    const token = authHeader.split(" ")[1];
+    const token = authHeader.substring(7).trim();
 
-    console.log("Token:", token);
+    if (!token) {
+        return res.status(401).json({
+            success: false,
+            message: "Authentication required."
+        });
+    }
 
     try {
         const decoded = jwt.verify(token, JWT_SECRET);
 
-        console.log("Decoded:", decoded);
+        if (!decoded || !decoded.id) {
+            return res.status(401).json({
+                success: false,
+                message: "Invalid authentication token."
+            });
+        }
 
         req.user = decoded;
         next();
 
-    } catch (err) {
-        console.log("JWT ERROR:", err.message);
-
+    } catch (error) {
         return res.status(401).json({
             success: false,
-            message: err.message
+            message: "Invalid or expired authentication token."
         });
     }
 }
