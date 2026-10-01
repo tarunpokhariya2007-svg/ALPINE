@@ -71,61 +71,6 @@ const features = [
   },
 ]
 
-const pricing = [
-  {
-    label: 'Citizen',
-    price: '₹0',
-    period: 'Forever Free',
-    highlight: false,
-    color: '#D4AF37',
-    features: [
-      '5 AI consultations / month',
-      'Basic document analysis',
-      'Jurisdiction finder',
-      'Browse advocate listings',
-      'Multilingual support',
-      'Community forum access',
-    ],
-    cta: 'Start Free',
-    href: '/signup',
-  },
-  {
-    label: 'Citizen Pro',
-    price: '₹299',
-    period: 'per month',
-    highlight: true,
-    color: '#D4AF37',
-    features: [
-      'Unlimited AI consultations',
-      'Advanced document analysis (50 docs)',
-      'Priority advocate matching',
-      'Secure encrypted chat',
-      'Case timeline tracker',
-      'Export reports as PDF',
-      'Dedicated support',
-    ],
-    cta: 'Get Pro',
-    href: '/signup',
-  },
-  {
-    label: 'Advocate',
-    price: '₹999',
-    period: 'per month',
-    highlight: false,
-    color: '#D4AF37',
-    features: [
-      'AI Research Assistant',
-      'Case file analysis & summaries',
-      'Similar judgment finder',
-      'Draft argument generator',
-      'Client management portal',
-      'Analytics & earnings dashboard',
-      'Verified badge & profile boost',
-    ],
-    cta: 'Join as Advocate',
-    href: '/advocate-login',
-  },
-]
 
 const teamProfileLinkStyle: React.CSSProperties = {
   display: 'block',
@@ -149,6 +94,13 @@ export default function Landing() {
     } else {
       navigate('/login')
     }
+  }
+
+  // These landing-page feature buttons ALWAYS open the Login page first.
+  // This is intentional: even an already-authenticated user must go through
+  // the Login page when clicking one of the newly added Legal Help options.
+  const requireLogin = (_path: string) => {
+    navigate('/login')
   }
 
   useEffect(() => {
@@ -444,7 +396,7 @@ export default function Landing() {
 
             {/* Right – Illustration */}
             <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-              <HeroIllustration />
+              <HeroVideo />
             </div>
           </div>
         </div>
@@ -925,68 +877,166 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ── Pricing ── */}
+      {/* ── What You Can Do ── */}
       <section id="pricing" className="hero-gradient" style={{ padding: '100px 24px', borderTop: '1px solid var(--border)' }}>
         <div style={{ maxWidth: 1100, margin: '0 auto' }}>
-          <div style={{ textAlign: 'center', marginBottom: 64 }}>
-            <span className="section-tag" style={{ marginBottom: 16, display: 'inline-flex' }}>
-              Simple Pricing
+          <div style={{ textAlign: 'center', marginBottom: 56 }}>
+            <span className="section-tag" style={{ marginBottom: 16, display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+              <Scale size={12} /> Legal Help Starts Here
             </span>
-            <h2 style={{ fontSize: 'clamp(1.8rem, 3vw, 2.6rem)', fontWeight: 800, color: 'var(--text)', letterSpacing: '-0.03em', marginTop: 12 }}>
-              Transparent. Affordable. Fair.
+
+            <h2 style={{
+              fontSize: 'clamp(1.8rem, 3vw, 2.6rem)',
+              fontWeight: 800,
+              color: 'var(--text)',
+              letterSpacing: '-0.03em',
+              marginTop: 12,
+              marginBottom: 14,
+            }}>
+              Legal help that starts with you.
             </h2>
+
+            <p style={{
+              color: 'var(--text-muted)',
+              fontSize: '1rem',
+              lineHeight: 1.7,
+              maxWidth: 650,
+              margin: '0 auto',
+            }}>
+              Get AI-powered legal guidance, understand your rights, analyze documents,
+              and connect with advocates — all from one platform.
+            </p>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 24 }} className="pricing-grid">
-            {pricing.map(plan => (
-              <div key={plan.label}
-                className={plan.highlight ? 'card pricing-popular' : 'card'}
-                style={{ padding: 32, position: 'relative' }}>
-                {plan.highlight && (
-                  <div style={{
-                    position: 'absolute', top: -12, left: '50%', transform: 'translateX(-50%)',
-                    background: '#D4AF37',
-                    color: 'white', padding: '4px 16px', borderRadius: 99,
-                    fontSize: '0.7rem', fontWeight: 700, letterSpacing: '0.05em', whiteSpace: 'nowrap',
-                  }}>
-                    MOST POPULAR
-                  </div>
-                )}
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(3, 1fr)',
+              gap: 24,
+            }}
+            className="pricing-grid"
+          >
+            {[
+              {
+                icon: MessageSquare,
+                title: 'AI Legal Guidance',
+                desc: 'Describe your legal issue in simple language and get structured guidance based on your situation.',
+                button: 'Get Legal Help',
+                action: () => requireLogin('/dashboard/ai-assistant'),
+              },
+              {
+                icon: FileSearch,
+                title: 'Document Analysis',
+                desc: 'Upload legal documents and use AI to identify important information, clauses, risks, and key points.',
+                button: 'Analyze a Document',
+                action: () => requireLogin('/dashboard/documents'),
+              },
+              {
+                icon: Users,
+                title: 'Find an Advocate',
+                desc: 'Discover advocates based on your legal needs and connect with the right professional for your matter.',
+                button: 'Find an Advocate',
+                action: () => requireLogin('/dashboard/advocates'),
+              },
+            ].map(item => {
+              const Icon = item.icon
 
-                <div style={{ marginBottom: 8 }}>
-                  <div className="badge" style={{ background: `color-mix(in srgb, ${plan.color} 12%, transparent)`, color: plan.color, marginBottom: 12 }}>
-                    {plan.label}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'baseline', gap: 4 }}>
-                    <span style={{ fontSize: '2.8rem', fontWeight: 900, color: 'var(--text)', letterSpacing: '-0.04em' }}>
-                      {plan.price}
-                    </span>
-                    <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>/{plan.period}</span>
-                  </div>
-                </div>
-
-                <div style={{ height: 1, background: 'var(--border)', margin: '20px 0' }} />
-
-                <ul style={{ listStyle: 'none', padding: 0, margin: '0 0 28px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-                  {plan.features.map(f => (
-                    <li key={f} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: '0.875rem', color: 'var(--text-muted)' }}>
-                      <CheckCircle size={15} style={{ color: plan.color, marginTop: 1, flexShrink: 0 }} />
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-
-                <Link to={plan.href}
-                  className={plan.highlight ? 'btn-primary' : (plan.color === 'var(--emerald)' ? 'btn-emerald' : 'btn-ghost')}
+              return (
+                <div
+                  key={item.title}
+                  className="card"
                   style={{
-                    display: 'block', padding: '12px', borderRadius: 10, textAlign: 'center',
-                    fontWeight: 700, textDecoration: 'none', fontSize: '0.9rem',
-                    ...((!plan.highlight && plan.color !== 'var(--emerald)') ? { border: '1px solid var(--border)' } : {}),
-                  }}>
-                  {plan.cta}
-                </Link>
-              </div>
-            ))}
+                    padding: 30,
+                    position: 'relative',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    minHeight: 320,
+                  }}
+                >
+                  <div
+                    style={{
+                      width: 52,
+                      height: 52,
+                      borderRadius: 15,
+                      background: 'rgba(212,175,55,0.09)',
+                      border: '1px solid rgba(212,175,55,0.20)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      marginBottom: 20,
+                    }}
+                  >
+                    <Icon size={23} />
+                  </div>
+
+                  <h3
+                    style={{
+                      fontSize: '1.15rem',
+                      fontWeight: 750,
+                      color: 'var(--text)',
+                      marginBottom: 10,
+                    }}
+                  >
+                    {item.title}
+                  </h3>
+
+                  <p
+                    style={{
+                      fontSize: '0.9rem',
+                      color: 'var(--text-muted)',
+                      lineHeight: 1.7,
+                      margin: '0 0 24px',
+                      flex: 1,
+                    }}
+                  >
+                    {item.desc}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={item.action}
+                    className="btn-ghost"
+                    style={{
+                      width: '100%',
+                      padding: '12px 14px',
+                      borderRadius: 10,
+                      fontWeight: 700,
+                      fontSize: '0.88rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 8,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {item.button}
+                    <ArrowRight size={16} />
+                  </button>
+                </div>
+              )
+            })}
+          </div>
+
+          <div
+            style={{
+              marginTop: 28,
+              padding: '18px 22px',
+              borderRadius: 14,
+              border: '1px solid rgba(212,175,55,0.18)',
+              background: 'rgba(212,175,55,0.035)',
+              textAlign: 'center',
+            }}
+          >
+            <p
+              style={{
+                margin: 0,
+                color: 'rgba(255,255,255,0.72)',
+                fontSize: '0.86rem',
+                lineHeight: 1.6,
+              }}
+            >
+              Start exploring Nyaya AI today — no subscription purchase is required.
+            </p>
           </div>
         </div>
       </section>
@@ -1192,7 +1242,7 @@ export default function Landing() {
               </div>
             </div>
             {[
-              { heading: 'Platform', links: ['AI Assistant', 'Find Advocates', 'Document Analyzer', 'Jurisdiction Finder', 'Pricing'] },
+              { heading: 'Platform', links: ['AI Assistant', 'Find Advocates', 'Document Analyzer', 'Jurisdiction Finder', 'Legal Help'] },
               { heading: 'For Advocates', links: ['Join as Advocate', 'AI Research Tool', 'Client Management', 'Earnings Dashboard', 'Verification'] },
               { heading: 'Company', links: ['About Us', 'Careers', 'Blog', 'Press', 'Contact', 'Privacy Policy'] },
             ].map(col => (
@@ -1354,618 +1404,119 @@ export default function Landing() {
   )
 }
 
-function HeroIllustration() {
+function HeroVideo() {
+  const videoARef = useRef<HTMLVideoElement>(null)
+  const videoBRef = useRef<HTMLVideoElement>(null)
+  const [activeVideo, setActiveVideo] = useState<'A' | 'B'>('A')
+
+  useEffect(() => {
+    const videoA = videoARef.current
+    const videoB = videoBRef.current
+
+    if (!videoA || !videoB) return
+
+    let switching = false
+
+    const handleTimeUpdate = () => {
+      const currentVideo = activeVideo === 'A' ? videoA : videoB
+      const nextVideo = activeVideo === 'A' ? videoB : videoA
+
+      if (
+        !switching &&
+        Number.isFinite(currentVideo.duration) &&
+        currentVideo.duration > 0 &&
+        currentVideo.currentTime >= currentVideo.duration - 0.45
+      ) {
+        switching = true
+
+        nextVideo.currentTime = 0
+        nextVideo.play().catch(() => {})
+
+        setActiveVideo(activeVideo === 'A' ? 'B' : 'A')
+
+        window.setTimeout(() => {
+          currentVideo.pause()
+          currentVideo.currentTime = 0
+          switching = false
+        }, 450)
+      }
+    }
+
+    const activeVideoElement = activeVideo === 'A' ? videoA : videoB
+    activeVideoElement.addEventListener('timeupdate', handleTimeUpdate)
+
+    return () => {
+      activeVideoElement.removeEventListener('timeupdate', handleTimeUpdate)
+    }
+  }, [activeVideo])
+
   return (
     <div
-      className="legal-scale-animation"
+      className="legal-scale-video"
       style={{
         position: 'relative',
         width: 560,
         height: 460,
         maxWidth: '100%',
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
       }}
     >
-      <svg
-        viewBox="0 0 560 460"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
+      <video
+        ref={videoARef}
+        src="/hero-scale.mp4"
+        muted
+        autoPlay
+        playsInline
+        preload="auto"
+        aria-hidden="true"
         style={{
+          position: 'absolute',
+          inset: 0,
           width: '100%',
           height: '100%',
-          overflow: 'visible',
+          objectFit: 'contain',
+          opacity: activeVideo === 'A' ? 1 : 0,
+          transition: 'opacity 450ms ease-in-out',
+          pointerEvents: 'none',
         }}
-      >
-        <defs>
-          {/* Gold scale */}
-          <linearGradient id="goldScale2" x1="0" y1="0" x2="1" y2="1">
-            <stop offset="0%" stopColor="#FFF1A8" />
-            <stop offset="25%" stopColor="#D4AF37" />
-            <stop offset="60%" stopColor="#A77F18" />
-            <stop offset="100%" stopColor="#F3D76A" />
-          </linearGradient>
+      />
 
-          {/* Cloud */}
-          <linearGradient id="cloudGold" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#FFFDF5" />
-            <stop offset="100%" stopColor="#E9E2CF" />
-          </linearGradient>
-
-          <radialGradient id="scaleGlow">
-            <stop offset="0%" stopColor="#D4AF37" stopOpacity="0.18" />
-            <stop offset="100%" stopColor="#D4AF37" stopOpacity="0" />
-          </radialGradient>
-
-          <filter id="cloudShadow" x="-30%" y="-30%" width="160%" height="180%">
-            <feDropShadow
-              dx="0"
-              dy="8"
-              stdDeviation="8"
-              floodColor="#000000"
-              floodOpacity="0.45"
-            />
-          </filter>
-
-          <filter id="goldBlur" x="-100%" y="-100%" width="300%" height="300%">
-            <feGaussianBlur stdDeviation="5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-
-          {/* Arrow head */}
-          <marker
-            id="goldArrow"
-            markerWidth="10"
-            markerHeight="10"
-            refX="8"
-            refY="5"
-            orient="auto"
-            markerUnits="strokeWidth"
-          >
-            <path
-              d="M0 0 L10 5 L0 10 L2.5 5 Z"
-              fill="#D4AF37"
-            />
-          </marker>
-        </defs>
-
-        {/* Background glow */}
-        <circle cx="280" cy="235" r="205" fill="url(#scaleGlow)" />
-
-        {/* =====================================================
-            MAIN BALANCE SCALE
-            ===================================================== */}
-
-        <g
-          className="scale-balance"
-          style={{ transformOrigin: '280px 225px' }}
-        >
-          {/* Top finial */}
-          <circle
-            cx="280"
-            cy="42"
-            r="18"
-            fill="#050505"
-            stroke="url(#goldScale2)"
-            strokeWidth="3"
-          />
-
-          <path
-            d="M271 58 L289 58 L294 82 L266 82 Z"
-            fill="url(#goldScale2)"
-          />
-
-          {/* Center column */}
-          <rect
-            x="271"
-            y="75"
-            width="18"
-            height="285"
-            rx="9"
-            fill="url(#goldScale2)"
-            filter="url(#goldBlur)"
-          />
-
-          <rect
-            x="275"
-            y="85"
-            width="4"
-            height="265"
-            rx="2"
-            fill="#FFF0A6"
-            opacity="0.65"
-          />
-
-          {/* Beam */}
-          <path
-            d="
-              M105 128
-              Q155 92 205 112
-              Q242 128 280 112
-              Q318 128 355 112
-              Q405 92 455 128
-            "
-            stroke="url(#goldScale2)"
-            strokeWidth="15"
-            strokeLinecap="round"
-            fill="none"
-          />
-
-          {/* Center joint */}
-          <circle
-            cx="280"
-            cy="116"
-            r="16"
-            fill="#050505"
-            stroke="url(#goldScale2)"
-            strokeWidth="4"
-          />
-
-          <circle
-            cx="280"
-            cy="116"
-            r="5"
-            fill="#F3D76A"
-          />
-
-          {/* LEFT STRINGS */}
-          <g className="left-pan">
-            <line
-              x1="145"
-              y1="120"
-              x2="145"
-              y2="235"
-              stroke="url(#goldScale2)"
-              strokeWidth="3"
-            />
-            <line
-              x1="105"
-              y1="120"
-              x2="145"
-              y2="235"
-              stroke="url(#goldScale2)"
-              strokeWidth="3"
-            />
-            <line
-              x1="185"
-              y1="120"
-              x2="145"
-              y2="235"
-              stroke="url(#goldScale2)"
-              strokeWidth="3"
-            />
-
-            {/* Left pan */}
-            <path
-              d="
-                M82 235
-                Q145 260 208 235
-                L194 261
-                Q145 286 96 261
-                Z
-              "
-              fill="url(#goldScale2)"
-              stroke="#D4AF37"
-              strokeWidth="2"
-            />
-
-            <path
-              d="
-                M85 235
-                Q145 251 205 235
-                Q145 264 85 235
-              "
-              fill="#090909"
-            />
-          </g>
-
-          {/* RIGHT STRINGS */}
-          <g className="right-pan">
-            <line
-              x1="415"
-              y1="120"
-              x2="415"
-              y2="235"
-              stroke="url(#goldScale2)"
-              strokeWidth="3"
-            />
-            <line
-              x1="375"
-              y1="120"
-              x2="415"
-              y2="235"
-              stroke="url(#goldScale2)"
-              strokeWidth="3"
-            />
-            <line
-              x1="455"
-              y1="120"
-              x2="415"
-              y2="235"
-              stroke="url(#goldScale2)"
-              strokeWidth="3"
-            />
-
-            {/* Right pan */}
-            <path
-              d="
-                M352 235
-                Q415 260 478 235
-                L464 261
-                Q415 286 366 261
-                Z
-              "
-              fill="url(#goldScale2)"
-              stroke="#D4AF37"
-              strokeWidth="2"
-            />
-
-            <path
-              d="
-                M355 235
-                Q415 251 475 235
-                Q415 264 355 235
-              "
-              fill="#090909"
-            />
-          </g>
-
-          {/* Base */}
-          <path
-            d="
-              M225 365
-              Q280 338 335 365
-              L360 392
-              L200 392
-              Z
-            "
-            fill="url(#goldScale2)"
-          />
-
-          <ellipse
-            cx="280"
-            cy="393"
-            rx="82"
-            ry="13"
-            fill="#D4AF37"
-            opacity="0.28"
-          />
-        </g>
-
-        {/* =====================================================
-            LEFT FULL CLOUD
-            ===================================================== */}
-
-        <g className="cloud-left" filter="url(#cloudShadow)">
-          {/* Cloud */}
-          <path
-            d="
-              M18 142
-              C18 119 35 103 57 103
-              C62 78 83 60 108 60
-              C131 60 150 74 157 96
-              C164 91 173 88 183 88
-              C207 88 226 106 226 130
-              C226 135 225 140 223 144
-              C232 148 238 156 238 166
-              C238 183 224 196 207 196
-              L67 196
-              C40 196 18 174 18 148
-              Z
-            "
-            fill="url(#cloudGold)"
-            stroke="#D4AF37"
-            strokeWidth="3"
-          />
-
-          {/* Cloud highlight */}
-          <path
-            d="
-              M48 142
-              C48 126 61 116 76 116
-              C82 95 99 82 118 82
-              C136 82 150 94 155 111
-            "
-            stroke="#FFF7D0"
-            strokeWidth="4"
-            strokeLinecap="round"
-            opacity="0.9"
-          />
-
-          {/* Text */}
-          <text
-            x="128"
-            y="146"
-            textAnchor="middle"
-            fontSize="17"
-            fontWeight="800"
-            fill="#9C7517"
-            fontFamily="Inter, Arial, sans-serif"
-          >
-            Know Your Rights
-          </text>
-
-          <text
-            x="128"
-            y="169"
-            textAnchor="middle"
-            fontSize="12"
-            fontWeight="600"
-            fill="#6F5A2A"
-            fontFamily="Inter, Arial, sans-serif"
-          >
-            Get legal guidance
-          </text>
-
-          {/* Pointer connector */}
-          <path
-            d="M220 178 C245 188 250 203 164 228"
-            stroke="#D4AF37"
-            strokeWidth="3"
-            strokeDasharray="7 7"
-            markerEnd="url(#goldArrow)"
-            fill="none"
-          />
-
-          {/* Moving arrow head */}
-          <circle
-            className="arrow-dot-left"
-            cx="210"
-            cy="188"
-            r="4"
-            fill="#FFF0A6"
-          />
-        </g>
-
-        {/* =====================================================
-            RIGHT FULL CLOUD
-            ===================================================== */}
-
-        <g className="cloud-right" filter="url(#cloudShadow)">
-          {/* Cloud */}
-          <path
-            d="
-              M322 142
-              C322 119 339 103 361 103
-              C366 78 387 60 412 60
-              C435 60 454 74 461 96
-              C468 91 477 88 487 88
-              C511 88 530 106 530 130
-              C530 135 529 140 527 144
-              C536 148 542 156 542 166
-              C542 183 528 196 511 196
-              L371 196
-              C344 196 322 174 322 148
-              Z
-            "
-            fill="url(#cloudGold)"
-            stroke="#D4AF37"
-            strokeWidth="3"
-          />
-
-          {/* Cloud highlight */}
-          <path
-            d="
-              M352 142
-              C352 126 365 116 380 116
-              C386 95 403 82 422 82
-              C440 82 454 94 459 111
-            "
-            stroke="#FFF7D0"
-            strokeWidth="4"
-            strokeLinecap="round"
-            opacity="0.9"
-          />
-
-          {/* Text */}
-          <text
-            x="432"
-            y="146"
-            textAnchor="middle"
-            fontSize="17"
-            fontWeight="800"
-            fill="#9C7517"
-            fontFamily="Inter, Arial, sans-serif"
-          >
-            Login &amp; Explore
-          </text>
-
-          <text
-            x="432"
-            y="169"
-            textAnchor="middle"
-            fontSize="12"
-            fontWeight="600"
-            fill="#6F5A2A"
-            fontFamily="Inter, Arial, sans-serif"
-          >
-            Access your legal space
-          </text>
-
-          {/* Pointer connector */}
-          <path
-            d="M340 178 C315 188 310 203 396 228"
-            stroke="#D4AF37"
-            strokeWidth="3"
-            strokeDasharray="7 7"
-            markerEnd="url(#goldArrow)"
-            fill="none"
-          />
-
-          {/* Moving arrow head */}
-          <circle
-            className="arrow-dot-right"
-            cx="350"
-            cy="188"
-            r="4"
-            fill="#FFF0A6"
-          />
-        </g>
-
-        {/* Gold decorative dots */}
-        <g fill="#D4AF37">
-          <circle cx="32" cy="330" r="3" opacity="0.65" />
-          <circle cx="52" cy="350" r="2" opacity="0.4" />
-          <circle cx="505" cy="330" r="3" opacity="0.65" />
-          <circle cx="525" cy="350" r="2" opacity="0.4" />
-          <circle cx="280" cy="425" r="3" opacity="0.45" />
-        </g>
-      </svg>
+      <video
+        ref={videoBRef}
+        src="/hero-scale.mp4"
+        muted
+        playsInline
+        preload="auto"
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          opacity: activeVideo === 'B' ? 1 : 0,
+          transition: 'opacity 450ms ease-in-out',
+          pointerEvents: 'none',
+        }}
+      />
 
       <style>{`
-        /* Scale gently balances */
-        .scale-balance {
-          animation: scaleBalance 4.5s ease-in-out infinite;
+        .legal-scale-video {
+          overflow: visible;
         }
 
-        @keyframes scaleBalance {
-          0%, 100% {
-            transform: rotate(-2deg);
-          }
-
-          50% {
-            transform: rotate(2deg);
-          }
-        }
-
-        /* Pans move opposite to the beam */
-        .left-pan {
-          animation: leftPanMove 4.5s ease-in-out infinite;
-        }
-
-        .right-pan {
-          animation: rightPanMove 4.5s ease-in-out infinite;
-        }
-
-        @keyframes leftPanMove {
-          0%, 100% {
-            transform: translateY(5px);
-          }
-
-          50% {
-            transform: translateY(-7px);
-          }
-        }
-
-        @keyframes rightPanMove {
-          0%, 100% {
-            transform: translateY(-7px);
-          }
-
-          50% {
-            transform: translateY(5px);
-          }
-        }
-
-        /* Clouds float independently */
-        .cloud-left {
-          animation: leftCloudFloat 5s ease-in-out infinite;
-        }
-
-        .cloud-right {
-          animation: rightCloudFloat 5s ease-in-out infinite;
-        }
-
-        @keyframes leftCloudFloat {
-          0%, 100% {
-            transform: translateY(0);
-          }
-
-          50% {
-            transform: translateY(-8px);
-          }
-        }
-
-        @keyframes rightCloudFloat {
-          0%, 100% {
-            transform: translateY(-5px);
-          }
-
-          50% {
-            transform: translateY(3px);
-          }
-        }
-
-        /* Animated light traveling along left connector */
-        .arrow-dot-left {
-          animation: arrowLeft 2.2s linear infinite;
-        }
-
-        @keyframes arrowLeft {
-          0% {
-            transform: translate(0, 0);
-            opacity: 0;
-          }
-
-          15% {
-            opacity: 1;
-          }
-
-          50% {
-            transform: translate(-35px, 18px);
-            opacity: 1;
-          }
-
-          85% {
-            transform: translate(-65px, 36px);
-            opacity: 1;
-          }
-
-          100% {
-            transform: translate(-70px, 40px);
-            opacity: 0;
-          }
-        }
-
-        /* Animated light traveling along right connector */
-        .arrow-dot-right {
-          animation: arrowRight 2.2s linear infinite;
-        }
-
-        @keyframes arrowRight {
-          0% {
-            transform: translate(0, 0);
-            opacity: 0;
-          }
-
-          15% {
-            opacity: 1;
-          }
-
-          50% {
-            transform: translate(35px, 18px);
-            opacity: 1;
-          }
-
-          85% {
-            transform: translate(65px, 36px);
-            opacity: 1;
-          }
-
-          100% {
-            transform: translate(70px, 40px);
-            opacity: 0;
+        @media (max-width: 700px) {
+          .legal-scale-video {
+            width: 100% !important;
+            height: 420px !important;
           }
         }
 
         @media (prefers-reduced-motion: reduce) {
-          .scale-balance,
-          .left-pan,
-          .right-pan,
-          .cloud-left,
-          .cloud-right,
-          .arrow-dot-left,
-          .arrow-dot-right {
-            animation: none;
-          }
-        }
-
-        @media (max-width: 700px) {
-          .legal-scale-animation {
-            width:   100% !important;
-            height: auto !important;
-            min-height: 400px;
+          .legal-scale-video video {
+            transition: none !important;
           }
         }
       `}</style>

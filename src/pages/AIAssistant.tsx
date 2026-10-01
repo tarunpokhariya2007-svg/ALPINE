@@ -238,7 +238,6 @@ const handleDeleteChat = async (
       )
     )
 
-    localStorage.removeItem(`nyaya_case_${chatId}`)
 
     if (String(conversationId) === String(chatId)) {
       setConversationId(null)
@@ -353,7 +352,7 @@ try {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          title: text.trim().slice(0, 60) || "New Legal Case",
+          title: text.trim().slice(0, 60) || "New Chat",
         }),
       }
     )

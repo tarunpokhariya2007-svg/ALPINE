@@ -47,6 +47,10 @@ const { ensureOtpTable } = require("./database/otpModel");
 const { ensureGoogleAuthSupport } = require("./database/userModel");
 const { ensureRefreshTokenTable } = require("./database/refreshTokenModel");
 const { ensurePasswordResetTokenTable } = require("./database/passwordResetTokenModel");
+const {
+    ensureDocumentHashColumn,
+    ensureBlockchainColumns,
+} = require("./database/documentHashModel");
 
 ensureOtpTable().catch((err) => {
     console.error(
@@ -76,6 +80,20 @@ ensurePasswordResetTokenTable().catch((err) => {
     );
 });
 
+ensureDocumentHashColumn().catch((err) => {
+    console.error(
+        "Failed to ensure document_hash column:",
+        err.message
+    );
+});
+
+ensureBlockchainColumns().catch((err) => {
+    console.error(
+        "Failed to ensure blockchain registration columns:",
+        err.message
+    );
+});
+
 // =====================================================
 // ROUTES
 // =====================================================
@@ -93,6 +111,8 @@ const appointmentRoutes = require("./routes/appointmentRoutes");
 const availabilityRoutes = require("./routes/availabilityRoutes");
 const meetingRoutes = require("./routes/meetingRoutes");
 const signalingRoutes = require("./routes/signalingRoutes");
+const researchRoutes = require("./routes/researchRoutes");
+const searchRoutes = require("./routes/searchRoutes");
 
 // =====================================================
 // MIDDLEWARE / AGENTS
@@ -380,6 +400,22 @@ app.use(
 app.use(
     "/api/signaling",
     signalingRoutes
+);
+// -----------------------------------------------------
+// Advocate AI Research
+// -----------------------------------------------------
+
+app.use(
+    "/api/research",
+    researchRoutes
+);
+// -----------------------------------------------------
+// Global Content Search
+// -----------------------------------------------------
+
+app.use(
+    "/api/search",
+    searchRoutes
 );
 
 // =====================================================
@@ -1399,7 +1435,9 @@ server.listen(
         console.log(
             `Signaling API: http://localhost:${PORT}/api/signaling`
         );
-
+console.log(
+    `Research API: http://localhost:${PORT}/api/research`
+);
         console.log(
             `Socket.IO: http://localhost:${PORT}`
         );

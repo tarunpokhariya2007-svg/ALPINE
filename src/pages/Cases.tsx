@@ -30,21 +30,21 @@ const statusColor: Record<
   { c: string; bg: string; label: string }
 > = {
   open: {
-    c: 'var(--blue)',
-    bg: 'var(--blue-subtle)',
-    label: 'Active',
+    c: '#F59E0B',
+    bg: 'rgba(245,158,11,0.1)',
+    label: 'Processing',
   },
 
   in_progress: {
     c: '#F59E0B',
     bg: 'rgba(245,158,11,0.1)',
-    label: 'In Progress',
+    label: 'Processing',
   },
 
   resolved: {
-    c: 'var(--emerald)',
-    bg: 'var(--emerald-subtle)',
-    label: 'Resolved',
+    c: 'var(--text-muted)',
+    bg: 'rgba(120,120,120,0.1)',
+    label: 'Closed',
   },
 
   closed: {
@@ -60,7 +60,7 @@ export default function Cases() {
   const [cases, setCases] = useState<CaseItem[]>([])
 
   const [filter, setFilter] = useState<
-    'All' | 'Active' | 'Pending' | 'Resolved'
+    'All' | 'Processing' | 'Closed'
   >('All')
 
   const [search, setSearch] = useState('')
@@ -183,18 +183,13 @@ export default function Cases() {
     cases.filter(caseItem => {
       let matchesFilter = true
 
-      if (filter === 'Active') {
+      if (filter === 'Processing') {
         matchesFilter =
           caseItem.status === 'open' ||
           caseItem.status === 'in_progress'
       }
 
-      if (filter === 'Pending') {
-        matchesFilter =
-          caseItem.status === 'in_progress'
-      }
-
-      if (filter === 'Resolved') {
+      if (filter === 'Closed') {
         matchesFilter =
           caseItem.status === 'resolved' ||
           caseItem.status === 'closed'
@@ -224,28 +219,18 @@ export default function Cases() {
     })
 
   // =========================================================
-  // PROGRESS
+  // STATUS DISPLAY
   // =========================================================
 
-  const getProgress = (
-    status: CaseStatus
-  ) => {
-    switch (status) {
-      case 'open':
-        return 25
-
-      case 'in_progress':
-        return 60
-
-      case 'resolved':
-        return 100
-
-      case 'closed':
-        return 100
-
-      default:
-        return 0
+  const getStatusLabel = (status: CaseStatus) => {
+    if (
+      status === 'resolved' ||
+      status === 'closed'
+    ) {
+      return 'Closed'
     }
+
+    return 'Processing'
   }
 
   // =========================================================
@@ -472,9 +457,8 @@ export default function Cases() {
           {(
             [
               'All',
-              'Active',
-              'Pending',
-              'Resolved',
+              'Processing',
+              'Closed',
             ] as const
           ).map(f => (
 
@@ -570,11 +554,6 @@ export default function Cases() {
                 caseItem.status
               ] ||
               statusColor.open
-
-            const progress =
-              getProgress(
-                caseItem.status
-              )
 
             return (
 
@@ -748,44 +727,15 @@ export default function Cases() {
                   </div>
 
                 )}
-
-                {/* PROGRESS */}
-
                 <div
                   style={{
-                    height: 5,
-                    borderRadius: 3,
-                    background:
-                      'var(--border)',
-                    overflow: 'hidden',
+                    marginTop: 8,
+                    fontSize: '0.72rem',
+                    color: status.c,
+                    fontWeight: 650,
                   }}
                 >
-
-                  <div
-                    style={{
-                      height: '100%',
-                      width:
-                        `${progress}%`,
-                      borderRadius: 3,
-                      background:
-                        status.c,
-                      transition:
-                        'width 0.5s ease',
-                    }}
-                  />
-
-                </div>
-
-                <div
-                  style={{
-                    fontSize:
-                      '0.7rem',
-                    color:
-                      'var(--text-subtle)',
-                    marginTop: 4,
-                  }}
-                >
-                  {progress}% complete
+                  {getStatusLabel(caseItem.status)}
                 </div>
 
               </div>

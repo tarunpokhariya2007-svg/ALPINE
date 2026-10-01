@@ -10,55 +10,50 @@ import {
   Filter,
   ChevronDown,
   Award,
+  X,
 } from 'lucide-react'
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:5001'
+import { indiaDistricts } from '../data/indiaDistricts'
+import { practiceAreas } from '../data/practiceAreas'
 
-const cities = [
-  'All Cities',
-  'New Delhi',
-  'Mumbai',
-  'Kolkata',
-  'Hyderabad',
-  'Ahmedabad',
-  'Bangalore',
-  'Lucknow',
-  'Chennai',
-]
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  'http://localhost:5001'
 
-const areas = [
-  'All Areas',
-  'Property Law',
-  'Criminal Defence',
-  'Family Law',
-  'Consumer Law',
-  'Corporate Law',
-  'Employment Law',
-  'Tax Law',
-  'Immigration',
-]
-
-const feeRanges = [
-  'Any Fee',
-  'Under ₹1,000',
-  '₹1,000–₹1,500',
-  '₹1,500–₹2,000',
-  'Above ₹2,000',
-]
+// =====================================================
+// ADVOCATE LISTING
+// =====================================================
 
 export default function AdvocateListing() {
   const [search, setSearch] = useState('')
-  const [city, setCity] = useState('All Cities')
-  const [area, setArea] = useState('All Areas')
-  const [feeRange, setFeeRange] = useState('Any Fee')
-  const [minRating, setMinRating] = useState(0)
-  const [showFilters, setShowFilters] = useState(false)
+
+  const [district, setDistrict] =
+    useState('All Districts')
+
+  const [practiceArea, setPracticeArea] =
+    useState('All Practice Areas')
+
+  const [districtSearch, setDistrictSearch] =
+    useState('')
+
+  const [practiceAreaSearch, setPracticeAreaSearch] =
+    useState('')
+
+  const [minRating, setMinRating] =
+    useState(0)
+
+  const [showFilters, setShowFilters] =
+    useState(false)
 
   const [availability, setAvailability] =
-    useState<'All' | 'Available Now' | 'Busy'>('All')
+    useState<
+      'All' |
+      'Available Now' |
+      'Busy'
+    >('All')
 
-  const [expandedId, setExpandedId] =
-    useState<string | null>(null)
+  const [selectedAdvocate, setSelectedAdvocate] =
+    useState<any | null>(null)
 
   const [advocates, setAdvocates] =
     useState<any[]>([])
@@ -69,23 +64,20 @@ export default function AdvocateListing() {
   const [error, setError] =
     useState('')
 
-
   // =====================================================
   // LOAD REAL ADVOCATES FROM BACKEND
   // =====================================================
 
   useEffect(() => {
-
     const loadAdvocates = async () => {
-
       try {
-
         setLoading(true)
         setError('')
 
-        const response = await fetch(
-          `${API_URL}/api/lawyers`
-        )
+        const response =
+          await fetch(
+            `${API_URL}/api/lawyers`
+          )
 
         if (!response.ok) {
           throw new Error(
@@ -93,38 +85,35 @@ export default function AdvocateListing() {
           )
         }
 
-        const data = await response.json()
+        const data =
+          await response.json()
 
         console.log(
           'ADVOCATES FROM BACKEND:',
           data
         )
 
-
         if (
           !data.success ||
-          !Array.isArray(data.lawyers)
+          !Array.isArray(
+            data.lawyers
+          )
         ) {
-
           throw new Error(
             'Invalid advocate data received from server.'
           )
-
         }
-
-
-        // -------------------------------------------------
-        // Convert backend user data to card data
-        // -------------------------------------------------
 
         const formatted =
           data.lawyers.map(
             (lawyer: any) => {
-
               const name =
                 lawyer.full_name ||
                 'Advocate'
 
+              // -------------------------------------------
+              // INITIALS
+              // -------------------------------------------
 
               const initials =
                 name
@@ -138,11 +127,67 @@ export default function AdvocateListing() {
                   .substring(0, 2)
                   .toUpperCase()
 
+              // -------------------------------------------
+              // PRACTICE AREAS
+              // -------------------------------------------
+
+              const specializations =
+                lawyer.specialization
+                  ? String(
+                      lawyer.specialization
+                    )
+                      .split(',')
+                      .map(
+                        (item: string) =>
+                          item.trim()
+                      )
+                      .filter(Boolean)
+                  : []
+
+              // -------------------------------------------
+              // EXPERIENCE
+              // -------------------------------------------
+
+              let experience =
+                Number(
+                  lawyer.experience || 0
+                )
+
+              if (
+                experience <= 0 &&
+                lawyer.enrollment_year
+              ) {
+                const enrollmentYear =
+                  Number(
+                    lawyer.enrollment_year
+                  )
+
+                const currentYear =
+                  new Date().getFullYear()
+
+                if (
+                  enrollmentYear > 0 &&
+                  enrollmentYear <=
+                    currentYear
+                ) {
+                  experience =
+                    Math.max(
+                      0,
+                      currentYear -
+                        enrollmentYear
+                    )
+                }
+              }
+
+              // -------------------------------------------
+              // RETURN REAL ADVOCATE
+              // -------------------------------------------
 
               return {
-
                 id:
-                  String(lawyer.id),
+                  String(
+                    lawyer.id
+                  ),
 
                 name,
 
@@ -151,59 +196,88 @@ export default function AdvocateListing() {
                 color:
                   '#2563EB',
 
-                // We don't have practice-area
-                // data in users table yet.
                 specializations:
-                  ['General Practice'],
+                  specializations.length >
+                  0
+                    ? specializations
+                    : ['Legal Practice'],
 
-                // No rating column in current
-                // users table.
                 rating:
-                  0,
+                  Number(
+                    lawyer.rating || 0
+                  ),
 
                 reviews:
-                  0,
+                  Number(
+                    lawyer.reviews || 0
+                  ),
 
-                // No experience column yet.
-                experience:
-                  0,
+                experience,
 
                 languages:
-                  ['English', 'Hindi'],
+                  Array.isArray(
+                    lawyer.languages
+                  )
+                    ? lawyer.languages
+                    : [
+                        'English',
+                        'Hindi',
+                      ],
 
-                // No consultation fee column yet.
+                // Kept for the existing card UI.
+                // Fee is NOT used as a filter.
                 fee:
-                  0,
+                  Number(
+                    lawyer.fee || 0
+                  ),
 
-                // No city column yet.
                 city:
-                  'India',
+                  lawyer.location ||
+                  'Not provided',
 
                 court:
-                  'High Court',
+                  lawyer.high_court ||
+                  'Not provided',
 
                 available:
-                  true,
+                  lawyer.available !==
+                  undefined
+                    ? Boolean(
+                        lawyer.available
+                      )
+                    : true,
 
                 about:
-                  'Registered advocate available for legal consultation.',
+                  lawyer.bio ||
+                  'No biography provided.',
 
                 email:
-                  lawyer.email || '',
+                  lawyer.email ||
+                  '',
 
                 phone:
-                  lawyer.phone || '',
+                  lawyer.phone ||
+                  '',
 
+                verified:
+                  Boolean(
+                    lawyer.verified
+                  ),
+
+                enrollmentYear:
+                  lawyer.enrollment_year
+                    ? String(
+                        lawyer.enrollment_year
+                      )
+                    : '',
               }
-
             }
           )
 
-
-        setAdvocates(formatted)
-
+        setAdvocates(
+          formatted
+        )
       } catch (err: any) {
-
         console.error(
           'LOAD ADVOCATES ERROR:',
           err
@@ -215,126 +289,138 @@ export default function AdvocateListing() {
         )
 
         setAdvocates([])
-
       } finally {
-
         setLoading(false)
-
       }
-
     }
 
-
     loadAdvocates()
-
   }, [])
 
-
   // =====================================================
-  // FILTER
+  // SEARCH + FILTER ADVOCATES
+  //
+  // Search is intentionally normalized so that:
+  //   Rajesh Kumar
+  //   rajesh kumar
+  //   RAJESH KUMAR
+  //   RaJeSh KuMaR
+  // all return the same advocate.
+  //
+  // It also supports partial matches and searches name,
+  // specialization, location, and biography.
   // =====================================================
 
-  const filtered =
-    advocates.filter(a => {
+  const normalizeText = (value: unknown) =>
+    String(value ?? '')
+      .normalize('NFKC')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
 
-      const searchText =
-        search.toLowerCase()
+  const filtered = advocates.filter((a) => {
+    const searchText = normalizeText(search)
 
+    const advocateName = normalizeText(a.name)
+    const advocateSpecialization = normalizeText(
+      Array.isArray(a.specializations)
+        ? a.specializations.join(' ')
+        : a.specialization
+    )
+    const advocateLocation = normalizeText(a.city)
+    const advocateBio = normalizeText(a.about)
 
-      const matchSearch =
-        !search ||
-        a.name
-          .toLowerCase()
-          .includes(searchText) ||
+    const matchesSearch =
+      !searchText ||
+      advocateName.includes(searchText) ||
+      advocateSpecialization.includes(searchText) ||
+      advocateLocation.includes(searchText) ||
+      advocateBio.includes(searchText)
+
+    const selectedDistrictName =
+      district === 'All Districts'
+        ? ''
+        : normalizeText(district.split(' (')[0])
+
+    const matchesDistrict =
+      district === 'All Districts' ||
+      advocateLocation === selectedDistrictName ||
+      advocateLocation.includes(selectedDistrictName)
+
+    const selectedPracticeArea = normalizeText(practiceArea)
+
+    const matchesPracticeArea =
+      practiceArea === 'All Practice Areas' ||
+      (Array.isArray(a.specializations) &&
         a.specializations.some(
-          (s: string) =>
-            s
-              .toLowerCase()
-              .includes(searchText)
-        )
+          (item: string) =>
+            normalizeText(item) === selectedPracticeArea
+        ))
 
+    const matchesRating =
+      Number(a.rating || 0) >= minRating
 
-      const matchCity =
-        city === 'All Cities' ||
-        a.city === city
+    const matchesAvailability =
+      availability === 'All' ||
+      (availability === 'Available Now' && a.available) ||
+      (availability === 'Busy' && !a.available)
 
-
-      const matchArea =
-        area === 'All Areas' ||
-        a.specializations.some(
-          (s: string) =>
-            s === area
-        )
-
-
-      const matchRating =
-        a.rating >= minRating
-
-
-      const matchFee =
-        feeRange === 'Any Fee' ||
-
-        (
-          feeRange === 'Under ₹1,000' &&
-          a.fee < 1000
-        ) ||
-
-        (
-          feeRange === '₹1,000–₹1,500' &&
-          a.fee >= 1000 &&
-          a.fee <= 1500
-        ) ||
-
-        (
-          feeRange === '₹1,500–₹2,000' &&
-          a.fee > 1500 &&
-          a.fee <= 2000
-        ) ||
-
-        (
-          feeRange === 'Above ₹2,000' &&
-          a.fee > 2000
-        )
-
-
-      const matchAvailability =
-        availability === 'All' ||
-
-        (
-          availability === 'Available Now' &&
-          a.available
-        ) ||
-
-        (
-          availability === 'Busy' &&
-          !a.available
-        )
-
-
-      return (
-        matchSearch &&
-        matchCity &&
-        matchArea &&
-        matchRating &&
-        matchFee &&
-        matchAvailability
-      )
-
-    })
-
+    return (
+      matchesSearch &&
+      matchesDistrict &&
+      matchesPracticeArea &&
+      matchesRating &&
+      matchesAvailability
+    )
+  })
 
   // =====================================================
-  // UI
+  // CLEAR FILTERS
+  // =====================================================
+
+  const clearFilters = () => {
+    setDistrict(
+      'All Districts'
+    )
+
+    setPracticeArea(
+      'All Practice Areas'
+    )
+
+    setDistrictSearch('')
+
+    setPracticeAreaSearch('')
+
+    setMinRating(0)
+
+    setAvailability('All')
+  }
+
+  const hasActiveFilters =
+    district !==
+      'All Districts' ||
+    practiceArea !==
+      'All Practice Areas' ||
+    minRating > 0 ||
+    availability !==
+      'All'
+
+  // =====================================================
+  // RENDER
   // =====================================================
 
   return (
-
     <div className="page-enter">
 
-      {/* Header */}
+      {/* =================================================
+          HEADER
+      ================================================= */}
 
-      <div style={{ marginBottom: 24 }}>
-
+      <div
+        style={{
+          marginBottom: 24,
+        }}
+      >
         <h1
           style={{
             fontSize: '1.5rem',
@@ -349,17 +435,20 @@ export default function AdvocateListing() {
 
         <p
           style={{
-            color: 'var(--text-muted)',
-            fontSize: '0.9rem',
+            color:
+              'var(--text-muted)',
+            fontSize:
+              '0.9rem',
           }}
         >
-          {advocates.length} registered advocates
+          {advocates.length}{' '}
+          registered advocates
         </p>
-
       </div>
 
-
-      {/* Search + filters */}
+      {/* =================================================
+          SEARCH + FILTERS
+      ================================================= */}
 
       <div
         className="card"
@@ -368,7 +457,6 @@ export default function AdvocateListing() {
           marginBottom: 20,
         }}
       >
-
         <div
           style={{
             display: 'flex',
@@ -378,6 +466,8 @@ export default function AdvocateListing() {
           }}
         >
 
+          {/* MAIN SEARCH */}
+
           <div
             style={{
               flex: 1,
@@ -385,11 +475,11 @@ export default function AdvocateListing() {
               position: 'relative',
             }}
           >
-
             <Search
               size={15}
               style={{
-                position: 'absolute',
+                position:
+                  'absolute',
                 left: 10,
                 top: '50%',
                 transform:
@@ -401,42 +491,65 @@ export default function AdvocateListing() {
 
             <input
               className="input"
-              placeholder="Search by name or specialization..."
+              placeholder="Search by advocate name, specialization, district, or bio..."
               value={search}
               onChange={e =>
-                setSearch(e.target.value)
+                setSearch(
+                  e.target.value
+                )
               }
               style={{
                 paddingLeft: 32,
               }}
             />
-
           </div>
 
+          {/* DISTRICT */}
 
-          <SelectFilter
-            label="City"
-            value={city}
-            options={cities}
-            onChange={setCity}
+          <SearchableFilter
+            label="District"
+            value={district}
+            options={[
+              'All Districts',
+              ...indiaDistricts,
+            ]}
+            search={
+              districtSearch
+            }
+            setSearch={
+              setDistrictSearch
+            }
+            onChange={
+              setDistrict
+            }
           />
 
-          <SelectFilter
+          {/* PRACTICE AREA */}
+
+          <SearchableFilter
             label="Practice Area"
-            value={area}
-            options={areas}
-            onChange={setArea}
+            value={
+              practiceArea
+            }
+            options={[
+              'All Practice Areas',
+              ...practiceAreas,
+            ]}
+            search={
+              practiceAreaSearch
+            }
+            setSearch={
+              setPracticeAreaSearch
+            }
+            onChange={
+              setPracticeArea
+            }
           />
 
-          <SelectFilter
-            label="Fee Range"
-            value={feeRange}
-            options={feeRanges}
-            onChange={setFeeRange}
-          />
-
+          {/* MORE FILTERS */}
 
           <button
+            type="button"
             onClick={() =>
               setShowFilters(
                 s => !s
@@ -458,56 +571,53 @@ export default function AdvocateListing() {
                   : 'var(--text-muted)',
               cursor:
                 'pointer',
-              display:
-                'flex',
+              display: 'flex',
               alignItems:
                 'center',
               gap: 6,
               fontSize:
                 '0.875rem',
-              fontWeight:
-                500,
+              fontWeight: 500,
             }}
           >
-            <Filter size={14} />
+            <Filter
+              size={14}
+            />
+
             More Filters
           </button>
-
         </div>
 
+        {/* =================================================
+            MORE FILTERS
+        ================================================= */}
 
         {showFilters && (
-
           <div
             style={{
               marginTop: 14,
               paddingTop: 14,
               borderTop:
                 '1px solid var(--border)',
-              display:
-                'flex',
+              display: 'flex',
               gap: 16,
-              flexWrap:
-                'wrap',
-              alignItems:
-                'center',
+              flexWrap: 'wrap',
+              alignItems: 'center',
             }}
           >
 
-            <div>
+            {/* RATING */}
 
+            <div>
               <label
                 style={{
                   fontSize:
                     '0.78rem',
-                  fontWeight:
-                    600,
+                  fontWeight: 600,
                   color:
                     'var(--text-muted)',
-                  display:
-                    'block',
-                  marginBottom:
-                    6,
+                  display: 'block',
+                  marginBottom: 6,
                 }}
               >
                 Minimum Rating
@@ -515,68 +625,65 @@ export default function AdvocateListing() {
 
               <div
                 style={{
-                  display:
-                    'flex',
+                  display: 'flex',
                   gap: 6,
                 }}
               >
-
-                {[0, 4, 4.5, 4.8].map(
-                  r => (
-
-                    <button
-                      key={r}
-                      onClick={() =>
-                        setMinRating(r)
-                      }
-                      style={{
-                        padding:
-                          '5px 12px',
-                        borderRadius: 7,
-                        fontSize:
-                          '0.78rem',
-                        fontWeight: 600,
-                        border:
-                          '1px solid var(--border)',
-                        cursor:
-                          'pointer',
-                        background:
-                          minRating === r
-                            ? 'var(--blue-subtle)'
-                            : 'var(--bg-secondary)',
-                        color:
-                          minRating === r
-                            ? 'var(--blue)'
-                            : 'var(--text-muted)',
-                      }}
-                    >
-                      {r === 0
-                        ? 'Any'
-                        : `${r}+`} ⭐
-                    </button>
-
-                  )
-                )}
-
+                {[
+                  0,
+                  4,
+                  4.5,
+                  4.8,
+                ].map(r => (
+                  <button
+                    type="button"
+                    key={r}
+                    onClick={() =>
+                      setMinRating(r)
+                    }
+                    style={{
+                      padding:
+                        '5px 12px',
+                      borderRadius: 7,
+                      fontSize:
+                        '0.78rem',
+                      fontWeight: 600,
+                      border:
+                        '1px solid var(--border)',
+                      cursor:
+                        'pointer',
+                      background:
+                        minRating ===
+                        r
+                          ? 'var(--blue-subtle)'
+                          : 'var(--bg-secondary)',
+                      color:
+                        minRating ===
+                        r
+                          ? 'var(--blue)'
+                          : 'var(--text-muted)',
+                    }}
+                  >
+                    {r === 0
+                      ? 'Any'
+                      : `${r}+`} ⭐
+                  </button>
+                ))}
               </div>
-
             </div>
 
+            {/* AVAILABILITY */}
 
             <div>
-
               <label
                 style={{
                   fontSize:
                     '0.78rem',
-                  fontWeight:
-                    600,
+                  fontWeight: 600,
                   color:
                     'var(--text-muted)',
-                  display:
-                    'block',
-                  marginBottom:
-                    6,
+                  display: 'block',
+                  marginBottom: 6,
                 }}
               >
                 Availability
@@ -584,24 +691,24 @@ export default function AdvocateListing() {
 
               <div
                 style={{
-                  display:
-                    'flex',
+                  display: 'flex',
                   gap: 6,
                 }}
               >
-
                 {(
                   [
                     'All',
                     'Available Now',
                     'Busy',
                   ] as const
-                ).map(a => (
-
+                ).map(option => (
                   <button
-                    key={a}
+                    type="button"
+                    key={option}
                     onClick={() =>
-                      setAvailability(a)
+                      setAvailability(
+                        option
+                      )
                     }
                     style={{
                       padding:
@@ -615,215 +722,198 @@ export default function AdvocateListing() {
                       cursor:
                         'pointer',
                       background:
-                        availability === a
+                        availability ===
+                        option
                           ? 'var(--blue-subtle)'
                           : 'var(--bg-secondary)',
                       color:
-                        availability === a
+                        availability ===
+                        option
                           ? 'var(--blue)'
                           : 'var(--text-muted)',
                     }}
                   >
-                    {a}
+                    {option}
                   </button>
-
                 ))}
-
               </div>
-
             </div>
 
+            {/* CLEAR */}
+
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={
+                  clearFilters
+                }
+                style={{
+                  padding:
+                    '7px 12px',
+                  borderRadius: 7,
+                  border:
+                    '1px solid var(--border)',
+                  background:
+                    'var(--bg-secondary)',
+                  color:
+                    'var(--blue)',
+                  cursor:
+                    'pointer',
+                  fontSize:
+                    '0.78rem',
+                  fontWeight: 600,
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
-
         )}
-
       </div>
 
-
-      {/* Loading */}
+      {/* =================================================
+          LOADING
+      ================================================= */}
 
       {loading && (
-
         <div
           style={{
             padding: 60,
-            textAlign:
-              'center',
+            textAlign: 'center',
             color:
               'var(--text-muted)',
           }}
         >
           Loading advocates...
         </div>
-
       )}
 
+      {/* =================================================
+          ERROR
+      ================================================= */}
 
-      {/* Error */}
-
-      {!loading && error && (
-
-        <div
-          className="card"
-          style={{
-            padding: 30,
-            textAlign:
-              'center',
-          }}
-        >
-
+      {!loading &&
+        error && (
           <div
+            className="card"
             style={{
-              fontSize:
-                '2rem',
-              marginBottom:
-                10,
+              padding: 30,
+              textAlign: 'center',
             }}
           >
-            ⚠️
-          </div>
-
-          <div
-            style={{
-              fontWeight:
-                700,
-              color:
-                'var(--text)',
-              marginBottom:
-                6,
-            }}
-          >
-            Unable to load advocates
-          </div>
-
-          <div
-            style={{
-              color:
-                'var(--text-muted)',
-              fontSize:
-                '0.9rem',
-            }}
-          >
-            {error}
-          </div>
-
-        </div>
-
-      )}
-
-
-      {/* Results count */}
-
-      {!loading && !error && (
-
-        <div
-          style={{
-            marginBottom: 16,
-            display:
-              'flex',
-            alignItems:
-              'center',
-            gap: 8,
-          }}
-        >
-
-          <span
-            style={{
-              fontSize:
-                '0.875rem',
-              color:
-                'var(--text-muted)',
-            }}
-          >
-            Showing{' '}
-
-            <strong
+            <div
               style={{
+                fontSize: '2rem',
+                marginBottom: 10,
+              }}
+            >
+              ⚠️
+            </div>
+
+            <div
+              style={{
+                fontWeight: 700,
                 color:
                   'var(--text)',
+                marginBottom: 6,
               }}
             >
-              {filtered.length}
-            </strong>{' '}
+              Unable to load advocates
+            </div>
 
-            advocates
-          </span>
-
-
-          {(
-            city !== 'All Cities' ||
-            area !== 'All Areas' ||
-            feeRange !== 'Any Fee' ||
-            minRating > 0 ||
-            availability !== 'All'
-          ) && (
-
-            <button
-              onClick={() => {
-
-                setCity(
-                  'All Cities'
-                )
-
-                setArea(
-                  'All Areas'
-                )
-
-                setFeeRange(
-                  'Any Fee'
-                )
-
-                setMinRating(0)
-
-                setAvailability(
-                  'All'
-                )
-
+            <div
+              style={{
+                color:
+                  'var(--text-muted)',
+                fontSize:
+                  '0.9rem',
               }}
+            >
+              {error}
+            </div>
+          </div>
+        )}
+
+      {/* =================================================
+          RESULTS COUNT
+      ================================================= */}
+
+      {!loading &&
+        !error && (
+          <div
+            style={{
+              marginBottom: 16,
+              display: 'flex',
+              alignItems:
+                'center',
+              gap: 8,
+              flexWrap: 'wrap',
+            }}
+          >
+            <span
               style={{
                 fontSize:
-                  '0.78rem',
+                  '0.875rem',
                 color:
-                  'var(--blue)',
-                background:
-                  'none',
-                border:
-                  'none',
-                cursor:
-                  'pointer',
-                fontWeight:
-                  500,
+                  'var(--text-muted)',
               }}
             >
-              Clear all filters
-            </button>
+              Showing{' '}
 
-          )}
+              <strong
+                style={{
+                  color:
+                    'var(--text)',
+                }}
+              >
+                {filtered.length}
+              </strong>{' '}
 
-        </div>
+              advocates
+            </span>
 
-      )}
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={
+                  clearFilters
+                }
+                style={{
+                  fontSize:
+                    '0.78rem',
+                  color:
+                    'var(--blue)',
+                  background:
+                    'none',
+                  border: 'none',
+                  cursor:
+                    'pointer',
+                  fontWeight: 500,
+                }}
+              >
+                Clear all filters
+              </button>
+            )}
+          </div>
+        )}
 
-
-      {/* Advocate cards */}
+      {/* =================================================
+          ADVOCATE CARDS
+      ================================================= */}
 
       {!loading &&
         !error &&
         filtered.length > 0 && (
-
           <div
             style={{
-              display:
-                'grid',
+              display: 'grid',
               gridTemplateColumns:
                 'repeat(2, 1fr)',
               gap: 16,
             }}
             className="advocates-grid"
           >
-
             {filtered.map(a => (
-
               <div
                 key={a.id}
                 className="card card-interactive"
@@ -832,17 +922,17 @@ export default function AdvocateListing() {
                 }}
               >
 
-                {/* Top */}
+                {/* TOP */}
 
                 <div
                   style={{
-                    display:
-                      'flex',
+                    display: 'flex',
                     gap: 14,
-                    marginBottom:
-                      14,
+                    marginBottom: 14,
                   }}
                 >
+
+                  {/* AVATAR */}
 
                   <div
                     className="avatar"
@@ -858,6 +948,7 @@ export default function AdvocateListing() {
                     {a.initials}
                   </div>
 
+                  {/* NAME */}
 
                   <div
                     style={{
@@ -865,11 +956,9 @@ export default function AdvocateListing() {
                       minWidth: 0,
                     }}
                   >
-
                     <div
                       style={{
-                        display:
-                          'flex',
+                        display: 'flex',
                         alignItems:
                           'flex-start',
                         justifyContent:
@@ -877,13 +966,10 @@ export default function AdvocateListing() {
                         gap: 8,
                       }}
                     >
-
                       <div>
-
                         <div
                           style={{
-                            fontWeight:
-                              700,
+                            fontWeight: 700,
                             color:
                               'var(--text)',
                             fontSize:
@@ -895,16 +981,13 @@ export default function AdvocateListing() {
 
                         <div
                           style={{
-                            display:
-                              'flex',
+                            display: 'flex',
                             alignItems:
                               'center',
                             gap: 6,
-                            marginTop:
-                              2,
+                            marginTop: 2,
                           }}
                         >
-
                           <Award
                             size={11}
                             style={{
@@ -919,30 +1002,23 @@ export default function AdvocateListing() {
                                 '0.7rem',
                               color:
                                 'var(--emerald)',
-                              fontWeight:
-                                600,
+                              fontWeight: 600,
                             }}
                           >
                             Registered Advocate
                           </span>
-
                         </div>
-
                       </div>
-
 
                       <span
                         style={{
                           padding:
                             '4px 10px',
-                          borderRadius:
-                            99,
+                          borderRadius: 99,
                           fontSize:
                             '0.7rem',
-                          fontWeight:
-                            700,
-                          flexShrink:
-                            0,
+                          fontWeight: 700,
+                          flexShrink: 0,
                           background:
                             a.available
                               ? 'var(--emerald-subtle)'
@@ -957,31 +1033,22 @@ export default function AdvocateListing() {
                           ? '● Available'
                           : '○ Busy'}
                       </span>
-
                     </div>
-
                   </div>
-
                 </div>
 
-
-                {/* Specialization */}
+                {/* SPECIALIZATIONS */}
 
                 <div
                   style={{
-                    display:
-                      'flex',
+                    display: 'flex',
                     gap: 6,
-                    flexWrap:
-                      'wrap',
-                    marginBottom:
-                      12,
+                    flexWrap: 'wrap',
+                    marginBottom: 12,
                   }}
                 >
-
                   {a.specializations.map(
                     (s: string) => (
-
                       <span
                         key={s}
                         className="badge"
@@ -994,12 +1061,11 @@ export default function AdvocateListing() {
                       >
                         {s}
                       </span>
-
                     )
                   )}
-
                 </div>
 
+                {/* BIO */}
 
                 <p
                   style={{
@@ -1007,30 +1073,24 @@ export default function AdvocateListing() {
                       '0.8rem',
                     color:
                       'var(--text-muted)',
-                    lineHeight:
-                      1.5,
-                    marginBottom:
-                      14,
+                    lineHeight: 1.5,
+                    marginBottom: 14,
                   }}
                 >
                   {a.about}
                 </p>
 
-
-                {/* Meta */}
+                {/* META */}
 
                 <div
                   style={{
-                    display:
-                      'grid',
+                    display: 'grid',
                     gridTemplateColumns:
                       'repeat(4, 1fr)',
                     gap: 10,
-                    marginBottom:
-                      14,
+                    marginBottom: 14,
                   }}
                 >
-
                   <MetaStat
                     icon={Star}
                     val={
@@ -1066,42 +1126,34 @@ export default function AdvocateListing() {
                   <MetaStat
                     icon={Globe}
                     val={
-                      a.languages.length.toString()
+                      a.languages.length
+                        .toString()
                     }
                     sub="languages"
                   />
-
                 </div>
 
-
-                {/* Languages */}
+                {/* LANGUAGES */}
 
                 <div
                   style={{
-                    display:
-                      'flex',
+                    display: 'flex',
                     gap: 6,
-                    flexWrap:
-                      'wrap',
-                    marginBottom:
-                      16,
+                    flexWrap: 'wrap',
+                    marginBottom: 16,
                   }}
                 >
-
                   {a.languages.map(
-                    (l: string) => (
-
+                    (language: string) => (
                       <span
-                        key={l}
+                        key={language}
                         style={{
                           padding:
                             '2px 8px',
-                          borderRadius:
-                            6,
+                          borderRadius: 6,
                           fontSize:
                             '0.68rem',
-                          fontWeight:
-                            500,
+                          fontWeight: 500,
                           background:
                             'var(--bg-secondary)',
                           color:
@@ -1110,40 +1162,36 @@ export default function AdvocateListing() {
                             '1px solid var(--border)',
                         }}
                       >
-                        {l}
+                        {language}
                       </span>
-
                     )
                   )}
-
                 </div>
 
-
-                {/* Footer */}
+                {/* FOOTER */}
 
                 <div
                   style={{
-                    display:
-                      'flex',
+                    display: 'flex',
                     alignItems:
                       'center',
                     justifyContent:
                       'space-between',
                     borderTop:
                       '1px solid var(--border)',
-                    paddingTop:
-                      14,
+                    paddingTop: 14,
+                    gap: 12,
                   }}
                 >
 
-                  <div>
+                  {/* FEE DISPLAY */}
 
+                  <div>
                     <div
                       style={{
                         fontSize:
                           '1.2rem',
-                        fontWeight:
-                          800,
+                        fontWeight: 800,
                         color:
                           'var(--text)',
                       }}
@@ -1163,55 +1211,51 @@ export default function AdvocateListing() {
                     >
                       consultation
                     </div>
-
                   </div>
 
+                  {/* BUTTONS */}
 
                   <div
                     style={{
-                      display:
-                        'flex',
+                      display: 'flex',
                       gap: 8,
+                      flexWrap:
+                        'wrap',
+                      justifyContent:
+                        'flex-end',
                     }}
                   >
 
+                    {/* VIEW PROFILE */}
+
                     <button
+                      type="button"
                       onClick={() =>
-                        setExpandedId(
-                          id =>
-                            id === a.id
-                              ? null
-                              : a.id
+                        setSelectedAdvocate(
+                          a
                         )
                       }
                       style={{
                         padding:
                           '8px 14px',
-                        borderRadius:
-                          8,
+                        borderRadius: 8,
                         fontSize:
                           '0.8rem',
-                        fontWeight:
-                          600,
+                        fontWeight: 600,
                         border:
                           '1px solid var(--border)',
                         background:
-                          expandedId === a.id
-                            ? 'var(--blue-subtle)'
-                            : 'var(--bg-secondary)',
+                          'var(--bg-secondary)',
                         color:
-                          expandedId === a.id
-                            ? 'var(--blue)'
-                            : 'var(--text-muted)',
+                          'var(--text-muted)',
                         cursor:
                           'pointer',
                       }}
                     >
-                      {expandedId === a.id
-                        ? 'Hide Profile'
-                        : 'View Profile'}
+                      View Profile
                     </button>
 
+                    {/* BOOK */}
 
                     <Link
                       to={`/dashboard/booking?advocateId=${a.id}`}
@@ -1223,12 +1267,10 @@ export default function AdvocateListing() {
                       style={{
                         padding:
                           '8px 16px',
-                        borderRadius:
-                          8,
+                        borderRadius: 8,
                         fontSize:
                           '0.8rem',
-                        fontWeight:
-                          700,
+                        fontWeight: 700,
                         textDecoration:
                           'none',
                         display:
@@ -1247,173 +1289,44 @@ export default function AdvocateListing() {
                                 '1px solid var(--border)',
                               cursor:
                                 'not-allowed',
-                              opacity:
-                                0.6,
+                              opacity: 0.6,
                             }),
                       }}
                     >
-                      <Clock size={13} />
+                      <Clock
+                        size={13}
+                      />
 
                       {a.available
                         ? 'Book Consultation'
                         : 'Unavailable'}
                     </Link>
-
                   </div>
-
                 </div>
-
-
-                {/* Expanded profile */}
-
-                {expandedId === a.id && (
-
-                  <div
-                    style={{
-                      marginTop:
-                        16,
-                      paddingTop:
-                        16,
-                      borderTop:
-                        '1px solid var(--border)',
-                    }}
-                  >
-
-                    <div
-                      style={{
-                        display:
-                          'grid',
-                        gridTemplateColumns:
-                          '1fr 1fr',
-                        gap: 10,
-                        fontSize:
-                          '0.8rem',
-                      }}
-                    >
-
-                      <div>
-                        <span
-                          style={{
-                            color:
-                              'var(--text-muted)',
-                          }}
-                        >
-                          Email:
-                        </span>{' '}
-
-                        <strong
-                          style={{
-                            color:
-                              'var(--text)',
-                          }}
-                        >
-                          {a.email || 'Not provided'}
-                        </strong>
-                      </div>
-
-
-                      <div>
-                        <span
-                          style={{
-                            color:
-                              'var(--text-muted)',
-                          }}
-                        >
-                          Phone:
-                        </span>{' '}
-
-                        <strong
-                          style={{
-                            color:
-                              'var(--text)',
-                          }}
-                        >
-                          {a.phone || 'Not provided'}
-                        </strong>
-                      </div>
-
-
-                      <div>
-                        <span
-                          style={{
-                            color:
-                              'var(--text-muted)',
-                          }}
-                        >
-                          Experience:
-                        </span>{' '}
-
-                        <strong
-                          style={{
-                            color:
-                              'var(--text)',
-                          }}
-                        >
-                          {a.experience
-                            ? `${a.experience} years`
-                            : 'Not provided'}
-                        </strong>
-                      </div>
-
-
-                      <div>
-                        <span
-                          style={{
-                            color:
-                              'var(--text-muted)',
-                          }}
-                        >
-                          Consultation:
-                        </span>{' '}
-
-                        <strong
-                          style={{
-                            color:
-                              'var(--text)',
-                          }}
-                        >
-                          {a.fee
-                            ? `₹${a.fee.toLocaleString()}/hr`
-                            : 'Not provided'}
-                        </strong>
-                      </div>
-
-                    </div>
-
-                  </div>
-
-                )}
-
               </div>
-
             ))}
-
           </div>
-
         )}
 
-
-      {/* No advocates */}
+      {/* =================================================
+          NO ADVOCATES
+      ================================================= */}
 
       {!loading &&
         !error &&
         filtered.length === 0 && (
-
           <div
             style={{
               padding:
                 '60px 20px',
-              textAlign:
-                'center',
+              textAlign: 'center',
             }}
           >
-
             <div
               style={{
                 fontSize:
                   '2.5rem',
-                marginBottom:
-                  12,
+                marginBottom: 12,
               }}
             >
               🔍
@@ -1421,12 +1334,10 @@ export default function AdvocateListing() {
 
             <div
               style={{
-                fontWeight:
-                  700,
+                fontWeight: 700,
                 color:
                   'var(--text)',
-                marginBottom:
-                  6,
+                marginBottom: 6,
               }}
             >
               No advocates found
@@ -1438,26 +1349,875 @@ export default function AdvocateListing() {
                   'var(--text-muted)',
                 fontSize:
                   '0.9rem',
+                marginBottom: 14,
               }}
             >
-              No registered advocates match your filters.
+              No registered advocates
+              match your filters.
             </div>
 
+            {hasActiveFilters && (
+              <button
+                type="button"
+                onClick={
+                  clearFilters
+                }
+                style={{
+                  padding:
+                    '8px 14px',
+                  borderRadius: 8,
+                  border:
+                    '1px solid var(--border)',
+                  background:
+                    'var(--bg-secondary)',
+                  color:
+                    'var(--blue)',
+                  cursor:
+                    'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Clear Filters
+              </button>
+            )}
           </div>
-
         )}
 
+      {/* =====================================================
+          ADVOCATE PROFILE MODAL
+      ===================================================== */}
+
+      {selectedAdvocate && (
+        <div
+          onClick={() =>
+            setSelectedAdvocate(null)
+          }
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            background:
+              'rgba(0, 0, 0, 0.68)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: 20,
+            backdropFilter:
+              'blur(5px)',
+          }}
+        >
+          <div
+            onClick={e =>
+              e.stopPropagation()
+            }
+            style={{
+              width: '100%',
+              maxWidth: 700,
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background:
+                'var(--bg)',
+              border:
+                '1px solid var(--border)',
+              borderRadius: 18,
+              boxShadow:
+                '0 25px 80px rgba(0,0,0,0.4)',
+            }}
+          >
+
+            {/* MODAL HEADER */}
+
+            <div
+              style={{
+                padding: 24,
+                borderBottom:
+                  '1px solid var(--border)',
+                display: 'flex',
+                alignItems:
+                  'flex-start',
+                justifyContent:
+                  'space-between',
+                gap: 16,
+              }}
+            >
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 16,
+                  alignItems:
+                    'center',
+                  minWidth: 0,
+                }}
+              >
+                <div
+                  className="avatar"
+                  style={{
+                    width: 68,
+                    height: 68,
+                    fontSize:
+                      '1.15rem',
+                    flexShrink: 0,
+                    background:
+                      `linear-gradient(135deg, ${selectedAdvocate.color}, ${selectedAdvocate.color}88)`,
+                  }}
+                >
+                  {
+                    selectedAdvocate.initials
+                  }
+                </div>
+
+                <div
+                  style={{
+                    minWidth: 0,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems:
+                        'center',
+                      gap: 8,
+                      flexWrap:
+                        'wrap',
+                    }}
+                  >
+                    <h2
+                      style={{
+                        margin: 0,
+                        fontSize:
+                          '1.25rem',
+                        fontWeight: 800,
+                        color:
+                          'var(--text)',
+                      }}
+                    >
+                      {
+                        selectedAdvocate.name
+                      }
+                    </h2>
+
+                    {selectedAdvocate.verified && (
+                      <span
+                        style={{
+                          padding:
+                            '3px 8px',
+                          borderRadius:
+                            999,
+                          fontSize:
+                            '0.68rem',
+                          fontWeight: 700,
+                          background:
+                            'var(--emerald-subtle)',
+                          color:
+                            'var(--emerald)',
+                        }}
+                      >
+                        ✓ Verified
+                      </span>
+                    )}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: 5,
+                      fontSize:
+                        '0.78rem',
+                      color:
+                        'var(--emerald)',
+                      fontWeight: 600,
+                    }}
+                  >
+                    Registered Advocate
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedAdvocate(
+                    null
+                  )
+                }
+                aria-label="Close profile"
+                style={{
+                  width: 34,
+                  height: 34,
+                  borderRadius: 9,
+                  border:
+                    '1px solid var(--border)',
+                  background:
+                    'var(--bg-secondary)',
+                  color:
+                    'var(--text-muted)',
+                  cursor:
+                    'pointer',
+                  display: 'flex',
+                  alignItems:
+                    'center',
+                  justifyContent:
+                    'center',
+                  flexShrink: 0,
+                }}
+              >
+                <X size={17} />
+              </button>
+            </div>
+
+            {/* MODAL CONTENT */}
+
+            <div
+              style={{
+                padding: 24,
+              }}
+            >
+
+              {/* CONTACT */}
+
+              <div
+                style={{
+                  marginBottom: 24,
+                }}
+              >
+                <h3
+                  style={{
+                    margin:
+                      '0 0 12px',
+                    fontSize:
+                      '0.9rem',
+                    fontWeight: 800,
+                    color:
+                      'var(--text)',
+                  }}
+                >
+                  Contact Information
+                </h3>
+
+                <div
+                  className="advocate-profile-details"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'repeat(2, minmax(0, 1fr))',
+                    gap: 12,
+                  }}
+                >
+                  <ProfileDetail
+                    label="Email"
+                    value={
+                      selectedAdvocate.email ||
+                      'Not provided'
+                    }
+                  />
+
+                  <ProfileDetail
+                    label="Phone"
+                    value={
+                      selectedAdvocate.phone
+                        ? `******${String(
+                            selectedAdvocate.phone
+                          ).slice(-4)}`
+                        : 'Not provided'
+                    }
+                  />
+
+                  <ProfileDetail
+                    label="District / Location"
+                    value={
+                      selectedAdvocate.city ||
+                      'Not provided'
+                    }
+                  />
+
+                  <ProfileDetail
+                    label="Court"
+                    value={
+                      selectedAdvocate.court ||
+                      'Not provided'
+                    }
+                  />
+                </div>
+              </div>
+
+              {/* PROFESSIONAL */}
+
+              <div
+                style={{
+                  marginBottom: 24,
+                }}
+              >
+                <h3
+                  style={{
+                    margin:
+                      '0 0 12px',
+                    fontSize:
+                      '0.9rem',
+                    fontWeight: 800,
+                    color:
+                      'var(--text)',
+                  }}
+                >
+                  Professional Information
+                </h3>
+
+                <div
+                  className="advocate-profile-details"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns:
+                      'repeat(2, minmax(0, 1fr))',
+                    gap: 12,
+                  }}
+                >
+                  <ProfileDetail
+                    label="Experience"
+                    value={
+                      selectedAdvocate.experience
+                        ? `${selectedAdvocate.experience} years`
+                        : 'Not provided'
+                    }
+                  />
+
+                  <ProfileDetail
+                    label="Enrollment Year"
+                    value={
+                      selectedAdvocate.enrollmentYear ||
+                      'Not provided'
+                    }
+                  />
+                </div>
+
+                {/* PRACTICE AREAS */}
+
+                <div
+                  style={{
+                    marginTop: 14,
+                  }}
+                >
+                  <div
+                    style={{
+                      fontSize:
+                        '0.72rem',
+                      color:
+                        'var(--text-muted)',
+                      marginBottom: 7,
+                      fontWeight: 600,
+                    }}
+                  >
+                    Practice Areas
+                  </div>
+
+                  <div
+                    style={{
+                      display: 'flex',
+                      gap: 7,
+                      flexWrap:
+                        'wrap',
+                    }}
+                  >
+                    {selectedAdvocate
+                      .specializations
+                      .map(
+                        (
+                          specialization: string
+                        ) => (
+                          <span
+                            key={
+                              specialization
+                            }
+                            className="badge"
+                            style={{
+                              background:
+                                'var(--blue-subtle)',
+                              color:
+                                'var(--blue)',
+                            }}
+                          >
+                            {
+                              specialization
+                            }
+                          </span>
+                        )
+                      )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ABOUT */}
+
+              <div>
+                <h3
+                  style={{
+                    margin:
+                      '0 0 10px',
+                    fontSize:
+                      '0.9rem',
+                    fontWeight: 800,
+                    color:
+                      'var(--text)',
+                  }}
+                >
+                  About
+                </h3>
+
+                <div
+                  style={{
+                    padding: 14,
+                    borderRadius: 10,
+                    background:
+                      'var(--bg-secondary)',
+                    border:
+                      '1px solid var(--border)',
+                    color:
+                      'var(--text-muted)',
+                    fontSize:
+                      '0.85rem',
+                    lineHeight: 1.65,
+                    whiteSpace:
+                      'pre-wrap',
+                  }}
+                >
+                  {
+                    selectedAdvocate.about ||
+                    'No biography provided.'
+                  }
+                </div>
+              </div>
+            </div>
+
+            {/* MODAL FOOTER */}
+
+            <div
+              style={{
+                padding:
+                  '16px 24px',
+                borderTop:
+                  '1px solid var(--border)',
+                display: 'flex',
+                justifyContent:
+                  'flex-end',
+                gap: 10,
+                flexWrap: 'wrap',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() =>
+                  setSelectedAdvocate(
+                    null
+                  )
+                }
+                style={{
+                  padding:
+                    '9px 16px',
+                  borderRadius: 8,
+                  border:
+                    '1px solid var(--border)',
+                  background:
+                    'var(--bg-secondary)',
+                  color:
+                    'var(--text-muted)',
+                  cursor:
+                    'pointer',
+                  fontWeight: 600,
+                }}
+              >
+                Close
+              </button>
+
+              <Link
+                to={`/dashboard/booking?advocateId=${selectedAdvocate.id}`}
+                onClick={() =>
+                  setSelectedAdvocate(
+                    null
+                  )
+                }
+                className="btn-primary"
+                style={{
+                  padding:
+                    '9px 16px',
+                  borderRadius: 8,
+                  textDecoration:
+                    'none',
+                  fontWeight: 700,
+                }}
+              >
+                Book Consultation
+              </Link>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* =================================================
+          RESPONSIVE
+      ================================================= */}
 
       <style>{`
+
         @media (max-width: 900px) {
+
           .advocates-grid {
-            grid-template-columns: 1fr !important;
+            grid-template-columns:
+              1fr !important;
           }
+
         }
+
+        @media (max-width: 600px) {
+
+          .advocate-profile-details {
+            grid-template-columns:
+              1fr !important;
+          }
+
+        }
+
       `}</style>
 
     </div>
+  )
+}
 
+
+// =====================================================
+// SEARCHABLE FILTER
+// =====================================================
+
+function SearchableFilter({
+  label,
+  value,
+  options,
+  search,
+  setSearch,
+  onChange,
+}: {
+  label: string
+  value: string
+  options: readonly string[]
+  search: string
+  setSearch: (value: string) => void
+  onChange: (value: string) => void
+}) {
+  const [open, setOpen] = useState(false)
+
+  // Normalize ONLY the dropdown search text.
+  // This makes District and Practice Area searches:
+  //   Amritsar
+  //   amritsar
+  //   AMRITSAR
+  //   AmRiTsAr
+  // behave identically.
+  const normalizeFilterText = (value: unknown) =>
+    String(value ?? '')
+      .normalize('NFKC')
+      .toLowerCase()
+      .trim()
+      .replace(/\s+/g, ' ')
+
+  const normalizedSearch = normalizeFilterText(search)
+
+  // Search the COMPLETE option label.
+  // Examples:
+  // "amrit" -> "Amritsar (Punjab)"
+  // "punjab" -> "Amritsar (Punjab)"
+  // "criminal" -> "Criminal Law"
+  // "CRIM" -> "Criminal Law"
+  const filteredOptions = options.filter((option) =>
+    normalizeFilterText(option).includes(normalizedSearch)
+  )
+
+  const allOption = options[0]
+  const matchingOptions = filteredOptions.filter(
+    (option) => option !== allOption
+  )
+
+  const handleSelect = (option: string) => {
+    onChange(option)
+    setSearch('')
+    setOpen(false)
+  }
+
+  return (
+    <div
+      style={{
+        position: 'relative',
+        minWidth: 190,
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        style={{
+          width: '100%',
+          minWidth: 190,
+          padding: '8px 32px 8px 12px',
+          borderRadius: 8,
+          border: '1px solid var(--border)',
+          background: 'var(--bg-secondary)',
+          color: 'var(--text)',
+          fontSize: '0.875rem',
+          cursor: 'pointer',
+          textAlign: 'left',
+          fontFamily: 'inherit',
+          position: 'relative',
+        }}
+      >
+        <span
+          style={{
+            display: 'block',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {value}
+        </span>
+
+        <ChevronDown
+          size={14}
+          style={{
+            position: 'absolute',
+            right: 10,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--text-muted)',
+            pointerEvents: 'none',
+          }}
+        />
+      </button>
+
+      {open && (
+        <>
+          {/* BACKDROP */}
+          <div
+            onClick={() => setOpen(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              zIndex: 999,
+            }}
+          />
+
+          {/* DROPDOWN */}
+          <div
+            style={{
+              position: 'absolute',
+              top: 'calc(100% + 6px)',
+              left: 0,
+              width: 300,
+              maxWidth: 'calc(100vw - 32px)',
+              maxHeight: 380,
+              overflowY: 'auto',
+              zIndex: 1000,
+              background: 'var(--bg)',
+              border: '1px solid var(--border)',
+              borderRadius: 10,
+              boxShadow: '0 15px 40px rgba(0,0,0,0.25)',
+              padding: 8,
+            }}
+          >
+            {/* SEARCH INPUT */}
+            <div
+              style={{
+                position: 'relative',
+                marginBottom: 8,
+              }}
+            >
+              <Search
+                size={14}
+                style={{
+                  position: 'absolute',
+                  left: 10,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  color: 'var(--text-muted)',
+                  pointerEvents: 'none',
+                }}
+              />
+
+              <input
+                autoFocus
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    setSearch('')
+                    setOpen(false)
+                  }
+
+                  if (e.key === 'Enter' && matchingOptions.length === 1) {
+                    e.preventDefault()
+                    handleSelect(matchingOptions[0])
+                  }
+                }}
+                placeholder={`Search ${label.toLowerCase()}...`}
+                className="input"
+                style={{
+                  width: '100%',
+                  paddingLeft: 30,
+                  paddingRight: search ? 30 : 10,
+                }}
+              />
+
+              {search && (
+                <button
+                  type="button"
+                  aria-label={`Clear ${label} search`}
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSearch('')
+                  }}
+                  style={{
+                    position: 'absolute',
+                    right: 7,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    width: 24,
+                    height: 24,
+                    border: 'none',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              )}
+            </div>
+
+            {/* ALL OPTION */}
+            {!normalizedSearch && (
+              <button
+                type="button"
+                onClick={() => handleSelect(allOption)}
+                style={{
+                  width: '100%',
+                  padding: '9px 10px',
+                  border: 'none',
+                  borderRadius: 7,
+                  background:
+                    value === allOption
+                      ? 'var(--blue-subtle)'
+                      : 'transparent',
+                  color:
+                    value === allOption
+                      ? 'var(--blue)'
+                      : 'var(--text)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontWeight: 600,
+                  fontSize: '0.82rem',
+                }}
+              >
+                {allOption}
+              </button>
+            )}
+
+            {/* SEARCH RESULTS */}
+            {matchingOptions.map((option) => (
+              <button
+                type="button"
+                key={option}
+                onClick={() => handleSelect(option)}
+                style={{
+                  width: '100%',
+                  padding: '9px 10px',
+                  border: 'none',
+                  borderRadius: 7,
+                  background:
+                    value === option
+                      ? 'var(--blue-subtle)'
+                      : 'transparent',
+                  color:
+                    value === option
+                      ? 'var(--blue)'
+                      : 'var(--text)',
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontSize: '0.82rem',
+                }}
+              >
+                {option}
+              </button>
+            ))}
+
+            {/* NO RESULT */}
+            {matchingOptions.length === 0 && (
+              <div
+                style={{
+                  padding: 14,
+                  textAlign: 'center',
+                  color: 'var(--text-muted)',
+                  fontSize: '0.8rem',
+                }}
+              >
+                No {label.toLowerCase()} found
+              </div>
+            )}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+
+// =====================================================
+// PROFILE DETAIL
+// =====================================================
+
+function ProfileDetail({
+  label,
+  value,
+}: {
+  label: string
+  value: string
+}) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        borderRadius: 10,
+        background:
+          'var(--bg-secondary)',
+        border:
+          '1px solid var(--border)',
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          fontSize:
+            '0.7rem',
+          color:
+            'var(--text-muted)',
+          marginBottom: 4,
+          fontWeight: 600,
+        }}
+      >
+        {label}
+      </div>
+
+      <div
+        style={{
+          fontSize:
+            '0.82rem',
+          color:
+            'var(--text)',
+          fontWeight: 600,
+          wordBreak:
+            'break-word',
+        }}
+      >
+        {value}
+      </div>
+    </div>
   )
 }
 
@@ -1479,20 +2239,16 @@ function MetaStat({
   iconColor?: string
   fill?: boolean
 }) {
-
   return (
-
     <div
       style={{
         textAlign:
           'center',
       }}
     >
-
       <div
         style={{
-          display:
-            'flex',
+          display: 'flex',
           alignItems:
             'center',
           justifyContent:
@@ -1500,7 +2256,6 @@ function MetaStat({
           gap: 3,
         }}
       >
-
         <Icon
           size={12}
           style={{
@@ -1520,15 +2275,13 @@ function MetaStat({
           style={{
             fontSize:
               '0.825rem',
-            fontWeight:
-              700,
+            fontWeight: 700,
             color:
               'var(--text)',
           }}
         >
           {val}
         </span>
-
       </div>
 
       <div
@@ -1537,106 +2290,11 @@ function MetaStat({
             '0.65rem',
           color:
             'var(--text-subtle)',
-          marginTop:
-            1,
+          marginTop: 1,
         }}
       >
         {sub}
       </div>
-
     </div>
-
-  )
-}
-
-
-// =====================================================
-// SELECT FILTER
-// =====================================================
-
-function SelectFilter({
-  label,
-  value,
-  options,
-  onChange,
-}: {
-  label: string
-  value: string
-  options: string[]
-  onChange: (v: string) => void
-}) {
-
-  return (
-
-    <div
-      style={{
-        position:
-          'relative',
-      }}
-    >
-
-      <select
-        value={value}
-        onChange={e =>
-          onChange(
-            e.target.value
-          )
-        }
-        style={{
-          padding:
-            '8px 28px 8px 12px',
-          borderRadius:
-            8,
-          border:
-            '1px solid var(--border)',
-          background:
-            'var(--bg-secondary)',
-          color:
-            'var(--text)',
-          fontSize:
-            '0.875rem',
-          cursor:
-            'pointer',
-          appearance:
-            'none',
-          outline:
-            'none',
-          fontFamily:
-            'inherit',
-        }}
-      >
-
-        {options.map(o => (
-
-          <option
-            key={o}
-            value={o}
-          >
-            {o}
-          </option>
-
-        ))}
-
-      </select>
-
-
-      <ChevronDown
-        size={13}
-        style={{
-          position:
-            'absolute',
-          right: 8,
-          top: '50%',
-          transform:
-            'translateY(-50%)',
-          color:
-            'var(--text-muted)',
-          pointerEvents:
-            'none',
-        }}
-      />
-
-    </div>
-
   )
 }

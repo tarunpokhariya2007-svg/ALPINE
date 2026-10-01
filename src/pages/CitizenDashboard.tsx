@@ -144,6 +144,12 @@ export default function CitizenDashboard() {
   const [loadingCases, setLoadingCases] = useState(true)
   const [caseError, setCaseError] = useState('')
 
+  // =========================================================
+  // REAL AI CONSULTATIONS FROM AI ASSISTANT HISTORY
+  // =========================================================
+
+  const [aiConsultations, setAiConsultations] = useState(0)
+
   // Get logged-in citizen
   const savedUser: any = getStoredUser() || {}
 
@@ -206,6 +212,62 @@ export default function CitizenDashboard() {
     }
 
     loadCases()
+  }, [])
+
+  // ==========================================
+  // LOAD REAL AI CONSULTATIONS
+  //
+  // Each saved AI Assistant conversation counts
+  // as one consultation. This is independent of
+  // My Cases.
+  // ==========================================
+
+  useEffect(() => {
+    const loadAIConsultations = async () => {
+      try {
+        if (!isLoggedIn()) {
+          setAiConsultations(0)
+          return
+        }
+
+        const response = await fetch(
+          `${API_URL}/api/chat/conversations`,
+          {
+            method: 'GET',
+            credentials: 'include',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          }
+        )
+
+        const result = await response.json()
+
+        if (!response.ok || !result.success) {
+          throw new Error(
+            result.message ||
+              'Failed to load AI consultations'
+          )
+        }
+
+        setAiConsultations(
+          Array.isArray(result.conversations)
+            ? result.conversations.length
+            : 0
+        )
+      } catch (error) {
+        console.error(
+          'LOAD AI CONSULTATIONS ERROR:',
+          error
+        )
+
+        // Do not show a fake number when the
+        // consultation history cannot be loaded.
+        setAiConsultations(0)
+      }
+    }
+
+    loadAIConsultations()
   }, [])
 
   // ==========================================
@@ -494,7 +556,7 @@ export default function CitizenDashboard() {
               lbl: 'Active',
             },
             {
-              val: '5',
+              val: String(aiConsultations),
               lbl: 'AI Consultations',
             },
             {
@@ -722,7 +784,7 @@ export default function CitizenDashboard() {
                     fontSize: '0.8rem',
                   }}
                 >
-                  No cases yet. Start a new case with the AI Assistant.
+                  No cases yet. Start a new case from My Cases.
                 </div>
               )}
 
@@ -733,21 +795,9 @@ export default function CitizenDashboard() {
                   c.status === 'resolved' ||
                   c.status === 'closed'
 
-                const isActive =
-                  c.status === 'open' ||
-                  c.status === 'in_progress'
-
-                const progress = isResolved
-                  ? 100
-                  : c.status === 'in_progress'
-                    ? 60
-                    : 25
-
                 const statusLabel = isResolved
-                  ? 'Resolved'
-                  : c.status === 'in_progress'
-                    ? 'In Progress'
-                    : 'Active'
+                  ? 'Closed'
+                  : 'Processing'
 
                 return (
                   <div
@@ -799,52 +849,16 @@ export default function CitizenDashboard() {
                         className="badge"
                         style={{
                           background: isResolved
-                            ? 'var(--emerald-subtle)'
-                            : isActive
-                              ? 'var(--blue-subtle)'
-                              : 'rgba(245,158,11,0.1)',
+                            ? 'rgba(120,120,120,0.1)'
+                            : 'rgba(245,158,11,0.1)',
                           color: isResolved
-                            ? 'var(--emerald)'
-                            : isActive
-                              ? 'var(--blue)'
-                              : '#F59E0B',
+                            ? 'var(--text-muted)'
+                            : '#F59E0B',
                           flexShrink: 0,
                         }}
                       >
                         {statusLabel}
                       </span>
-                    </div>
-
-                    <div
-                      style={{
-                        height: 4,
-                        borderRadius: 2,
-                        background: 'var(--border)',
-                        overflow: 'hidden',
-                      }}
-                    >
-                      <div
-                        style={{
-                          height: '100%',
-                          width: `${progress}%`,
-                          borderRadius: 2,
-                          background: isResolved
-                            ? 'var(--emerald)'
-                            : isActive
-                              ? 'var(--blue)'
-                              : '#F59E0B',
-                        }}
-                      />
-                    </div>
-
-                    <div
-                      style={{
-                        fontSize: '0.68rem',
-                        color: 'var(--text-subtle)',
-                        marginTop: 4,
-                      }}
-                    >
-                      {progress}% complete
                     </div>
                   </div>
                 )

@@ -9,6 +9,10 @@ import {
   Lock,
   Eye,
   X,
+  ShieldCheck,
+  Info,
+  Copy,
+  ExternalLink,
 } from "lucide-react";
 
 interface Doc {
@@ -18,6 +22,10 @@ interface Doc {
   date: string;
   type: string;
   url?: string;
+  documentHash?: string | null;
+  blockchainTxHash?: string | null;
+  blockchainStatus?: string | null;
+  blockchainNetwork?: string | null;
 }
 
 type ProtectedAction =
@@ -26,7 +34,8 @@ type ProtectedAction =
   | "open"
   | "download"
   | "rename"
-  | "delete";
+  | "delete"
+  | "verify_blockchain";
 
 const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:5001';
 
@@ -66,6 +75,34 @@ export default function Documents() {
   const [securitySubmitting, setSecuritySubmitting] =
     useState(false);
 
+  // =====================================================
+  // DOCUMENT SECURITY PASSWORD RESET STATE
+  // =====================================================
+
+  const [showResetModal, setShowResetModal] =
+    useState(false);
+
+  const [resetStep, setResetStep] =
+    useState<"request" | "verify">("request");
+
+  const [resetCode, setResetCode] =
+    useState("");
+
+  const [resetPassword, setResetPassword] =
+    useState("");
+
+  const [resetConfirmPassword, setResetConfirmPassword] =
+    useState("");
+
+  const [resetError, setResetError] =
+    useState<string | null>(null);
+
+  const [resetSubmitting, setResetSubmitting] =
+    useState(false);
+
+  const [resetEmail, setResetEmail] =
+    useState<string | null>(null);
+
   const [protectedAction, setProtectedAction] =
     useState<ProtectedAction | null>(null);
 
@@ -80,6 +117,30 @@ export default function Documents() {
 
   const [pendingRenameName, setPendingRenameName] =
     useState("");
+
+  const [verifyingBlockchainId, setVerifyingBlockchainId] =
+    useState<number | undefined>(undefined);
+
+  // =====================================================
+  // BLOCKCHAIN PROOF / DETAILS VIEW STATE (Step 6)
+  // =====================================================
+
+  const [showBlockchainDetails, setShowBlockchainDetails] =
+    useState(false);
+
+  const [blockchainDetailsDoc, setBlockchainDetailsDoc] =
+    useState<Doc | null>(null);
+
+  // Most recent /blockchain/verify result per document id,
+  // so the Details view can show the last-known verification
+  // result without re-triggering a verify itself.
+  const [blockchainVerifyResults, setBlockchainVerifyResults] =
+    useState<
+      Record<
+        number,
+        { status: string; verified?: boolean }
+      >
+    >({});
 
   const [pendingDeleteId, setPendingDeleteId] =
     useState<number | undefined>(undefined);
@@ -261,6 +322,16 @@ export default function Documents() {
             // Files are opened/downloaded through
             // protected backend endpoints.
             url: undefined,
+
+            // Blockchain proof/details (Step 6) — already
+            // provided by GET /api/documents.
+            documentHash: doc.document_hash || null,
+            blockchainTxHash:
+              doc.blockchain_tx_hash || null,
+            blockchainStatus:
+              doc.blockchain_status || null,
+            blockchainNetwork:
+              doc.blockchain_network || null,
           })
         );
 
@@ -320,6 +391,9 @@ export default function Documents() {
 
       case "delete":
         return "delete this document";
+
+      case "verify_blockchain":
+        return "verify this document on the blockchain";
 
       default:
         return "continue";
@@ -536,6 +610,176 @@ export default function Documents() {
     };
 
   // =====================================================
+  // REQUEST DOCUMENT SECURITY PASSWORD RESET
+  // =====================================================
+
+  const handleRequestDocumentPasswordReset = async () => {
+    setResetError(null);
+
+    try {
+      setResetSubmitting(true);
+
+      if (!isLoggedIn()) {
+        setResetError("Please login again.");
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE}/api/document-security/request-reset`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setResetError(
+          result.message ||
+            "Unable to send the reset code."
+        );
+        return;
+      }
+
+      setResetEmail(
+        result.emailMasked ||
+          result.email ||
+          null
+      );
+      setResetStep("verify");
+      setResetError(null);
+    } catch (error) {
+      console.error(
+        "REQUEST DOCUMENT PASSWORD RESET ERROR:",
+        error
+      );
+
+      setResetError(
+        "Unable to send the reset code."
+      );
+    } finally {
+      setResetSubmitting(false);
+    }
+  };
+
+  // =====================================================
+  // RESET DOCUMENT SECURITY PASSWORD
+  // =====================================================
+
+  const handleResetDocumentPassword = async () => {
+    setResetError(null);
+
+    if (!resetCode.trim()) {
+      setResetError("Please enter the reset code.");
+      return;
+    }
+
+    if (!resetPassword) {
+      setResetError(
+        "Please enter a new Document Security Password."
+      );
+      return;
+    }
+
+    if (resetPassword.length < 8) {
+      setResetError(
+        "Document Security Password must be at least 8 characters."
+      );
+      return;
+    }
+
+    if (resetPassword.length > 128) {
+      setResetError(
+        "Document Security Password must not exceed 128 characters."
+      );
+      return;
+    }
+
+    if (resetPassword !== resetConfirmPassword) {
+      setResetError(
+        "New Document Security Passwords do not match."
+      );
+      return;
+    }
+
+    try {
+      setResetSubmitting(true);
+
+      if (!isLoggedIn()) {
+        setResetError("Please login again.");
+        return;
+      }
+
+      const response = await fetch(
+        `${API_BASE}/api/document-security/reset-password`,
+        {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            code: resetCode.trim(),
+            password: resetPassword,
+            confirmPassword: resetConfirmPassword,
+          }),
+        }
+      );
+
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        setResetError(
+          result.message ||
+            "Unable to reset Document Security Password."
+        );
+        return;
+      }
+
+      const newlyResetPassword = resetPassword;
+      const actionAfterReset = protectedAction;
+
+      setHasSecurityPassword(true);
+      setShowResetModal(false);
+      setResetStep("request");
+      setResetCode("");
+      setResetPassword("");
+      setResetConfirmPassword("");
+      setResetEmail(null);
+      setResetError(null);
+
+      showToast(
+        "Document Security Password reset successfully"
+      );
+
+      // Continue the action that originally required the
+      // Document Security Password. The new password is
+      // kept only in memory and is not stored in localStorage.
+      if (actionAfterReset) {
+        await continueProtectedAction(
+          actionAfterReset,
+          newlyResetPassword
+        );
+      }
+    } catch (error) {
+      console.error(
+        "RESET DOCUMENT PASSWORD ERROR:",
+        error
+      );
+
+      setResetError(
+        "Unable to reset Document Security Password."
+      );
+    } finally {
+      setResetSubmitting(false);
+    }
+  };
+
+  // =====================================================
   // CONTINUE AFTER PASSWORD VERIFICATION
   // =====================================================
 
@@ -589,6 +833,15 @@ export default function Documents() {
           pendingDeleteName,
           password
         );
+        break;
+
+      case "verify_blockchain":
+        if (pendingDocument) {
+          await performBlockchainVerify(
+            pendingDocument,
+            password
+          );
+        }
         break;
     }
 
@@ -1272,6 +1525,213 @@ export default function Documents() {
     };
 
   // =====================================================
+  // VERIFY ON BLOCKCHAIN REQUEST
+  // =====================================================
+
+  const verifyOnBlockchain = (
+    doc: Doc
+  ) => {
+    if (!doc.id) {
+      alert(
+        "Document ID not found."
+      );
+      return;
+    }
+
+    if (verifyingBlockchainId) {
+      // Already verifying a document — ignore
+      // duplicate clicks.
+      return;
+    }
+
+    setPendingDocument(doc);
+
+    requireDocumentPassword(
+      "verify_blockchain"
+    );
+  };
+
+  // =====================================================
+  // VERIFY ON BLOCKCHAIN AFTER PASSWORD
+  // =====================================================
+
+  const performBlockchainVerify =
+    async (
+      doc: Doc,
+      documentPassword: string
+    ) => {
+      if (!doc.id) {
+        alert(
+          "Document ID not found."
+        );
+        return;
+      }
+
+      try {
+        setVerifyingBlockchainId(
+          doc.id
+        );
+
+        if (!isLoggedIn()) {
+          alert(
+            "Please login again."
+          );
+          return;
+        }
+
+        const response =
+          await fetch(
+            `${API_BASE}/api/documents/${doc.id}/blockchain/verify`,
+            {
+              method: "POST",
+
+              credentials: "include",
+
+              headers: {
+
+                "X-Document-Password":
+                  documentPassword,
+              },
+            }
+          );
+
+        const result =
+          await response.json();
+
+        if (
+          !response.ok ||
+          !result.success
+        ) {
+          showToast(
+            result.message ||
+              "Unable to verify document on blockchain."
+          );
+          return;
+        }
+
+        if (doc.id) {
+          setBlockchainVerifyResults((prev) => ({
+            ...prev,
+            [doc.id as number]: {
+              status: result.status,
+              verified: result.verified,
+            },
+          }));
+        }
+
+        switch (result.status) {
+          case "verified":
+            showToast(
+              "✓ Blockchain Verified"
+            );
+            break;
+
+          case "tampered":
+            showToast(
+              "⚠ Document Tampered"
+            );
+            break;
+
+          case "not_registered":
+            showToast(
+              "Blockchain Registration Not Found"
+            );
+            break;
+
+          case "blockchain_unavailable":
+            showToast(
+              "Blockchain Verification Unavailable"
+            );
+            break;
+
+          default:
+            showToast(
+              "Blockchain Verification Unavailable"
+            );
+            break;
+        }
+      } catch (error) {
+        console.error(
+          "BLOCKCHAIN VERIFY ERROR:",
+          error
+        );
+
+        showToast(
+          "Blockchain Verification Unavailable"
+        );
+      } finally {
+        setVerifyingBlockchainId(
+          undefined
+        );
+      }
+    };
+
+  // =====================================================
+  // BLOCKCHAIN PROOF / DETAILS VIEW (Step 6)
+  // =====================================================
+
+  const openBlockchainDetails = (doc: Doc) => {
+    setBlockchainDetailsDoc(doc);
+    setShowBlockchainDetails(true);
+  };
+
+  const closeBlockchainDetails = () => {
+    setShowBlockchainDetails(false);
+    setBlockchainDetailsDoc(null);
+  };
+
+  const shortenHash = (
+    hash: string,
+    front = 8,
+    back = 6
+  ) => {
+    if (!hash || hash.length <= front + back + 3) {
+      return hash;
+    }
+    return `${hash.slice(0, front)}...${hash.slice(-back)}`;
+  };
+
+  const copyToClipboard = async (
+    value: string,
+    label: string
+  ) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      showToast(`${label} copied`);
+    } catch (error) {
+      console.error("COPY ERROR:", error);
+      showToast("Unable to copy");
+    }
+  };
+
+  // Only known testnet/mainnet network labels get a
+  // constructed explorer link. Unrecognized/unset network
+  // names simply don't render a "View Transaction" link.
+  const BLOCK_EXPLORER_BASE_URLS: Record<string, string> = {
+    "polygon-amoy": "https://amoy.polygonscan.com/tx/",
+    "polygon-mainnet": "https://polygonscan.com/tx/",
+    polygon: "https://polygonscan.com/tx/",
+    sepolia: "https://sepolia.etherscan.io/tx/",
+    goerli: "https://goerli.etherscan.io/tx/",
+    ethereum: "https://etherscan.io/tx/",
+    mainnet: "https://etherscan.io/tx/",
+  };
+
+  const getExplorerTxUrl = (
+    network: string | null | undefined,
+    txHash: string | null | undefined
+  ) => {
+    if (!network || !txHash) {
+      return null;
+    }
+    const base =
+      BLOCK_EXPLORER_BASE_URLS[
+        network.trim().toLowerCase()
+      ];
+    return base ? `${base}${txHash}` : null;
+  };
+
+  // =====================================================
   // CLOSE SECURITY MODALS
   // =====================================================
 
@@ -1804,6 +2264,82 @@ export default function Documents() {
                 }}
               >
                 <Download
+                  size={13}
+                />
+              </button>
+
+              {/* VERIFY ON BLOCKCHAIN */}
+
+              <button
+                title="Verify on Blockchain"
+                disabled={
+                  verifyingBlockchainId ===
+                  d.id
+                }
+                onClick={() =>
+                  verifyOnBlockchain(d)
+                }
+                style={{
+                  padding: 7,
+                  borderRadius: 6,
+                  border:
+                    "1px solid var(--border)",
+                  background:
+                    "var(--bg-card)",
+                  color:
+                    "var(--text-muted)",
+                  cursor:
+                    verifyingBlockchainId ===
+                    d.id
+                      ? "not-allowed"
+                      : "pointer",
+                  opacity:
+                    verifyingBlockchainId ===
+                    d.id
+                      ? 0.6
+                      : 1,
+                  display:
+                    "flex",
+                  alignItems:
+                    "center",
+                  gap: 4,
+                  fontSize:
+                    "0.7rem",
+                  flexShrink: 0,
+                }}
+              >
+                <ShieldCheck
+                  size={13}
+                />
+                {verifyingBlockchainId ===
+                d.id
+                  ? "Verifying..."
+                  : ""}
+              </button>
+
+              {/* BLOCKCHAIN PROOF / DETAILS */}
+
+              <button
+                title="Blockchain Proof / Details"
+                onClick={() =>
+                  openBlockchainDetails(d)
+                }
+                style={{
+                  padding: 7,
+                  borderRadius: 6,
+                  border:
+                    "1px solid var(--border)",
+                  background:
+                    "var(--bg-card)",
+                  color:
+                    "var(--text-muted)",
+                  cursor:
+                    "pointer",
+                  display:
+                    "flex",
+                }}
+              >
+                <Info
                   size={13}
                 />
               </button>
@@ -2363,23 +2899,668 @@ export default function Documents() {
 
             <div
               style={{
-                textAlign:
-                  "center",
+                textAlign: "center",
                 marginTop: 13,
-                fontSize:
-                  "0.72rem",
-                color:
-                  "var(--text-muted)",
+                fontSize: "0.72rem",
+                color: "var(--text-muted)",
               }}
             >
-              Forgot your Document Security
-              Password? Password reset will be
-              available through your registered
-              email.
+              Forgot your Document Security Password?{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowVerifyModal(false);
+                  setShowResetModal(true);
+                  setResetStep("request");
+                  setResetCode("");
+                  setResetPassword("");
+                  setResetConfirmPassword("");
+                  setResetEmail(null);
+                  setResetError(null);
+                }}
+                disabled={securitySubmitting}
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  padding: 0,
+                  color: "var(--gold)",
+                  cursor: securitySubmitting
+                    ? "not-allowed"
+                    : "pointer",
+                  fontSize: "inherit",
+                  textDecoration: "underline",
+                  opacity: securitySubmitting ? 0.6 : 1,
+                }}
+              >
+                Reset it
+              </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* =====================================================
+          DOCUMENT SECURITY PASSWORD RESET MODAL
+      ===================================================== */}
+
+      {showResetModal && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 10000,
+            background: "rgba(0, 0, 0, 0.55)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 20,
+          }}
+        >
+          <div
+            className="card"
+            style={{
+              width: "100%",
+              maxWidth: 440,
+              padding: 24,
+              borderRadius: 14,
+              position: "relative",
+            }}
+          >
+            <button
+              onClick={() => {
+                if (resetSubmitting) return;
+                setShowResetModal(false);
+                setResetStep("request");
+                setResetCode("");
+                setResetPassword("");
+                setResetConfirmPassword("");
+                setResetEmail(null);
+                setResetError(null);
+              }}
+              disabled={resetSubmitting}
+              style={{
+                position: "absolute",
+                top: 14,
+                right: 14,
+                border: "none",
+                background: "transparent",
+                color: "var(--text-muted)",
+                cursor: resetSubmitting
+                  ? "not-allowed"
+                  : "pointer",
+                padding: 4,
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            <div
+              style={{
+                width: 46,
+                height: 46,
+                borderRadius: 12,
+                background: "var(--blue-subtle)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginBottom: 14,
+              }}
+            >
+              <Lock
+                size={22}
+                style={{ color: "var(--blue)" }}
+              />
+            </div>
+
+            <h2
+              style={{
+                margin: 0,
+                fontSize: "1.15rem",
+                fontWeight: 750,
+                color: "var(--text)",
+              }}
+            >
+              Reset Document Security Password
+            </h2>
+
+            <p
+              style={{
+                marginTop: 7,
+                marginBottom: 20,
+                color: "var(--text-muted)",
+                fontSize: "0.82rem",
+                lineHeight: 1.5,
+              }}
+            >
+              {resetStep === "request"
+                ? "We will send a verification code to your registered email address."
+                : `Enter the verification code sent to ${resetEmail || "your registered email"}, then create a new password.`}
+            </p>
+
+            {resetStep === "request" ? (
+              <>
+                <button
+                  onClick={handleRequestDocumentPasswordReset}
+                  disabled={resetSubmitting}
+                  className="btn-primary"
+                  style={{
+                    width: "100%",
+                    marginTop: 4,
+                    padding: "11px 16px",
+                    borderRadius: 9,
+                    border: "none",
+                    fontWeight: 650,
+                    cursor: resetSubmitting
+                      ? "not-allowed"
+                      : "pointer",
+                    opacity: resetSubmitting ? 0.7 : 1,
+                  }}
+                >
+                  {resetSubmitting
+                    ? "Sending Code..."
+                    : "Send Reset Code"}
+                </button>
+              </>
+            ) : (
+              <>
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    color: "var(--text)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Verification Code
+                </label>
+
+                <input
+                  autoFocus
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  value={resetCode}
+                  onChange={(e) => {
+                    setResetCode(
+                      e.target.value.replace(/\D/g, "").slice(0, 8)
+                    );
+                    setResetError(null);
+                  }}
+                  placeholder="Enter verification code"
+                  disabled={resetSubmitting}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "11px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-card)",
+                    color: "var(--text)",
+                    outline: "none",
+                    marginBottom: 12,
+                  }}
+                />
+
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    color: "var(--text)",
+                    marginBottom: 6,
+                  }}
+                >
+                  New Document Security Password
+                </label>
+
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={resetPassword}
+                  onChange={(e) => {
+                    setResetPassword(e.target.value);
+                    setResetError(null);
+                  }}
+                  placeholder="Enter new password"
+                  disabled={resetSubmitting}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "11px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-card)",
+                    color: "var(--text)",
+                    outline: "none",
+                    marginBottom: 12,
+                  }}
+                />
+
+                <label
+                  style={{
+                    display: "block",
+                    fontSize: "0.8rem",
+                    fontWeight: 600,
+                    color: "var(--text)",
+                    marginBottom: 6,
+                  }}
+                >
+                  Confirm New Password
+                </label>
+
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={resetConfirmPassword}
+                  onChange={(e) => {
+                    setResetConfirmPassword(e.target.value);
+                    setResetError(null);
+                  }}
+                  placeholder="Confirm new password"
+                  disabled={resetSubmitting}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      handleResetDocumentPassword();
+                    }
+                  }}
+                  style={{
+                    width: "100%",
+                    boxSizing: "border-box",
+                    padding: "11px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-card)",
+                    color: "var(--text)",
+                    outline: "none",
+                  }}
+                />
+
+                <div
+                  style={{
+                    marginTop: 12,
+                    fontSize: "0.72rem",
+                    color: "var(--text-muted)",
+                  }}
+                >
+                  Minimum 8 characters. The reset code should be used only once.
+                </div>
+
+                <button
+                  onClick={handleResetDocumentPassword}
+                  disabled={resetSubmitting}
+                  className="btn-primary"
+                  style={{
+                    width: "100%",
+                    marginTop: 18,
+                    padding: "11px 16px",
+                    borderRadius: 9,
+                    border: "none",
+                    fontWeight: 650,
+                    cursor: resetSubmitting
+                      ? "not-allowed"
+                      : "pointer",
+                    opacity: resetSubmitting ? 0.7 : 1,
+                  }}
+                >
+                  {resetSubmitting
+                    ? "Resetting..."
+                    : "Reset Password"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRequestDocumentPasswordReset}
+                  disabled={resetSubmitting}
+                  style={{
+                    width: "100%",
+                    marginTop: 10,
+                    padding: "9px 12px",
+                    borderRadius: 8,
+                    border: "1px solid var(--border)",
+                    background: "var(--bg-card)",
+                    color: "var(--text-muted)",
+                    cursor: resetSubmitting
+                      ? "not-allowed"
+                      : "pointer",
+                    fontSize: "0.78rem",
+                  }}
+                >
+                  Resend Code
+                </button>
+              </>
+            )}
+
+            {resetError && (
+              <div
+                style={{
+                  marginTop: 12,
+                  padding: "9px 11px",
+                  borderRadius: 8,
+                  background: "rgba(239, 68, 68, 0.08)",
+                  border: "1px solid rgba(239, 68, 68, 0.2)",
+                  color: "#EF4444",
+                  fontSize: "0.78rem",
+                }}
+              >
+                {resetError}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* =====================================================
+          BLOCKCHAIN PROOF / DETAILS MODAL (Step 6)
+      ===================================================== */}
+
+      {showBlockchainDetails &&
+        blockchainDetailsDoc && (
+          <div
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 9999,
+              background:
+                "rgba(0, 0, 0, 0.55)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 20,
+            }}
+          >
+            <div
+              className="card"
+              style={{
+                width: "100%",
+                maxWidth: 440,
+                padding: 24,
+                borderRadius: 14,
+                position: "relative",
+              }}
+            >
+              <button
+                onClick={
+                  closeBlockchainDetails
+                }
+                style={{
+                  position: "absolute",
+                  top: 14,
+                  right: 14,
+                  border: "none",
+                  background: "transparent",
+                  color: "var(--text-muted)",
+                  cursor: "pointer",
+                  padding: 4,
+                }}
+              >
+                <X size={18} />
+              </button>
+
+              <div
+                style={{
+                  width: 46,
+                  height: 46,
+                  borderRadius: 12,
+                  background:
+                    "var(--blue-subtle)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  marginBottom: 14,
+                }}
+              >
+                <ShieldCheck
+                  size={22}
+                  style={{
+                    color: "var(--blue)",
+                  }}
+                />
+              </div>
+
+              <h2
+                style={{
+                  margin: 0,
+                  fontSize: "1.05rem",
+                }}
+              >
+                Blockchain Proof
+              </h2>
+
+              <div
+                style={{
+                  fontSize: "0.78rem",
+                  color: "var(--text-muted)",
+                  marginBottom: 16,
+                  wordBreak: "break-word",
+                }}
+              >
+                {blockchainDetailsDoc.name}
+              </div>
+
+              {(() => {
+                const status =
+                  blockchainDetailsDoc.blockchainStatus;
+
+                const statusLabel =
+                  status === "registered"
+                    ? "Registered on blockchain"
+                    : status === "failed"
+                    ? "Registration failed"
+                    : "Not registered";
+
+                const verifyResult =
+                  blockchainDetailsDoc.id
+                    ? blockchainVerifyResults[
+                        blockchainDetailsDoc.id
+                      ]
+                    : undefined;
+
+                const verifyLabel = (() => {
+                  if (!verifyResult) {
+                    return "Not checked yet — use \"Verify on Blockchain\" to check.";
+                  }
+                  switch (verifyResult.status) {
+                    case "verified":
+                      return "✓ Verified — matches on-chain record";
+                    case "tampered":
+                      return "⚠ Tampered — does not match on-chain record";
+                    case "not_registered":
+                      return "Not registered on blockchain";
+                    case "blockchain_unavailable":
+                      return "Blockchain unavailable — try again later";
+                    default:
+                      return "Unknown";
+                  }
+                })();
+
+                const explorerUrl = getExplorerTxUrl(
+                  blockchainDetailsDoc.blockchainNetwork,
+                  blockchainDetailsDoc.blockchainTxHash
+                );
+
+                const rowStyle: React.CSSProperties = {
+                  marginBottom: 14,
+                };
+
+                const labelStyle: React.CSSProperties = {
+                  fontSize: "0.68rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.04em",
+                  color: "var(--text-muted)",
+                  marginBottom: 4,
+                };
+
+                const valueRowStyle: React.CSSProperties = {
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: "0.85rem",
+                  fontFamily:
+                    "monospace",
+                  wordBreak: "break-all",
+                };
+
+                return (
+                  <div>
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>
+                        Blockchain Status
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {statusLabel}
+                      </div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>
+                        SHA-256 Document Hash
+                      </div>
+                      {blockchainDetailsDoc.documentHash ? (
+                        <div style={valueRowStyle}>
+                          <span>
+                            {shortenHash(
+                              blockchainDetailsDoc.documentHash
+                            )}
+                          </span>
+                          <button
+                            title="Copy full hash"
+                            onClick={() =>
+                              copyToClipboard(
+                                blockchainDetailsDoc.documentHash as string,
+                                "Document hash"
+                              )
+                            }
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              color: "var(--text-muted)",
+                              cursor: "pointer",
+                              padding: 2,
+                              display: "flex",
+                            }}
+                          >
+                            <Copy size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          Not available
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>
+                        Blockchain Transaction Hash
+                      </div>
+                      {blockchainDetailsDoc.blockchainTxHash ? (
+                        <div style={valueRowStyle}>
+                          <span>
+                            {shortenHash(
+                              blockchainDetailsDoc.blockchainTxHash
+                            )}
+                          </span>
+                          <button
+                            title="Copy full transaction hash"
+                            onClick={() =>
+                              copyToClipboard(
+                                blockchainDetailsDoc.blockchainTxHash as string,
+                                "Transaction hash"
+                              )
+                            }
+                            style={{
+                              border: "none",
+                              background: "transparent",
+                              color: "var(--text-muted)",
+                              cursor: "pointer",
+                              padding: 2,
+                              display: "flex",
+                            }}
+                          >
+                            <Copy size={13} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            fontSize: "0.85rem",
+                            color: "var(--text-muted)",
+                          }}
+                        >
+                          Not available
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>
+                        Blockchain Network
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {blockchainDetailsDoc.blockchainNetwork ||
+                          "Not available"}
+                      </div>
+                    </div>
+
+                    <div style={rowStyle}>
+                      <div style={labelStyle}>
+                        Verification Status
+                      </div>
+                      <div
+                        style={{
+                          fontSize: "0.85rem",
+                        }}
+                      >
+                        {verifyLabel}
+                      </div>
+                    </div>
+
+                    {explorerUrl && (
+                      <a
+                        href={explorerUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          gap: 6,
+                          marginTop: 10,
+                          padding: "9px 14px",
+                          borderRadius: 8,
+                          border:
+                            "1px solid var(--border)",
+                          background:
+                            "var(--bg-card)",
+                          color: "var(--blue)",
+                          fontSize: "0.8rem",
+                          textDecoration: "none",
+                        }}
+                      >
+                        View Transaction
+                        <ExternalLink size={13} />
+                      </a>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+          </div>
+        )}
     </div>
   );
 }

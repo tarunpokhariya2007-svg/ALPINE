@@ -6,6 +6,17 @@ const bcrypt = require("bcrypt");
 
 const db = require("../db");
 const authMiddleware = require("../middleware/authMiddleware");
+const {
+    hashDocument,
+    anchorHashOnChain,
+    verifyHashOnChain,
+    isBlockchainEnabled,
+} = require("../services/blockchainService");
+const { getNetworkName } = require("../utils/blockchainConfig");
+const {
+    setBlockchainRegistration,
+    getDocumentForBlockchain,
+} = require("../database/documentHashModel");
 
 const router = express.Router();
 
@@ -327,7 +338,10 @@ router.get(
                     file_name,
                     file_path,
                     file_type,
-                    uploaded_at
+                    uploaded_at,
+                    document_hash,
+                    blockchain_tx_hash,
+                    blockchain_status
                 FROM documents
                 WHERE user_id = ?
                 ORDER BY uploaded_at DESC
@@ -345,12 +359,23 @@ router.get(
              * after document-password verification.
              */
 
+            // Step 6: expose the already-existing blockchain
+            // proof fields (hash, tx hash, status, network name)
+            // so the frontend can render a read-only Blockchain
+            // Proof / Details view. Never expose RPC URLs,
+            // private keys, or any other env/credential values.
             const safeDocuments = documents.map((document) => ({
                 id: document.id,
                 user_id: document.user_id,
                 file_name: document.file_name,
                 file_type: document.file_type,
-                uploaded_at: document.uploaded_at
+                uploaded_at: document.uploaded_at,
+                document_hash: document.document_hash || null,
+                blockchain_tx_hash: document.blockchain_tx_hash || null,
+                blockchain_status: document.blockchain_status || null,
+                blockchain_network: document.blockchain_tx_hash
+                    ? (getNetworkName() || null)
+                    : null
             }));
 
             return res.json({
@@ -370,6 +395,64 @@ router.get(
         }
     }
 );
+
+/* =========================================================
+   BLOCKCHAIN REGISTRATION HELPER (Step 3)
+
+   Attempts to anchor an already-computed document hash on the
+   configured EVM testnet and records the outcome against the
+   document row. Never throws — any blockchain/RPC/config error
+   is logged server-side only and reflected as a safe 'failed'
+   status, so a blockchain problem can never corrupt the
+   document record, block the upload response, or leak
+   sensitive details (RPC URLs, private keys) to the client.
+
+   Only the document hash + document id are ever sent on-chain
+   (as the transaction's data field via anchorHashOnChain) —
+   never the file itself or any personal information.
+========================================================= */
+
+async function registerDocumentOnBlockchain(documentId, documentHash) {
+    if (!isBlockchainEnabled()) {
+        // Feature is off: leave blockchain_tx_hash/blockchain_status
+        // untouched (NULL) and do nothing else.
+        return { attempted: false, status: null, txHash: null };
+    }
+
+    try {
+        const anchorResult = await anchorHashOnChain(documentHash);
+
+        await setBlockchainRegistration(documentId, {
+            status: "registered",
+            txHash: anchorResult.txHash,
+        });
+
+        return {
+            attempted: true,
+            status: "registered",
+            txHash: anchorResult.txHash,
+        };
+    } catch (blockchainError) {
+        console.error(
+            "BLOCKCHAIN REGISTRATION ERROR (document " + documentId + "):",
+            blockchainError.message
+        );
+
+        try {
+            await setBlockchainRegistration(documentId, {
+                status: "failed",
+                txHash: null,
+            });
+        } catch (dbError) {
+            console.error(
+                "BLOCKCHAIN STATUS UPDATE ERROR (document " + documentId + "):",
+                dbError.message
+            );
+        }
+
+        return { attempted: true, status: "failed", txHash: null };
+    }
+}
 
 /* =========================================================
    UPLOAD DOCUMENT
@@ -395,6 +478,27 @@ router.post(
             const fileType = req.file.mimetype;
 
             /*
+             * DOCUMENT INTEGRITY HASH (Step 2 of the blockchain
+             * integrity foundation):
+             *
+             * Compute the SHA-256 fingerprint of the exact bytes
+             * multer just wrote to disk. This is pure hashing —
+             * no blockchain/RPC/wallet involvement here at all,
+             * so it works whether or not BLOCKCHAIN_ENABLED is set.
+             *
+             * If hashing fails, treat it the same as any other
+             * failed upload: remove the physical file and return
+             * an error, instead of saving a document row with a
+             * missing/incorrect fingerprint.
+             */
+
+            const fileBuffer = await fs.promises.readFile(
+                req.file.path
+            );
+
+            const documentHash = hashDocument(fileBuffer);
+
+            /*
              * IMPORTANT:
              *
              * Your actual documents table only contains:
@@ -405,6 +509,7 @@ router.post(
              * file_path
              * file_type
              * uploaded_at
+             * document_hash (added in Step 2)
              *
              * Therefore we DO NOT insert:
              *
@@ -420,26 +525,49 @@ router.post(
                         user_id,
                         file_name,
                         file_path,
-                        file_type
+                        file_type,
+                        document_hash
                     )
                 VALUES
-                    (?, ?, ?, ?)
+                    (?, ?, ?, ?, ?)
                 `,
                 [
                     req.user.id,
                     fileName,
                     filePath,
-                    fileType
+                    fileType,
+                    documentHash
                 ]
+            );
+
+            const documentId = result.insertId;
+
+            /*
+             * BLOCKCHAIN REGISTRATION (Step 3):
+             *
+             * Only attempted when BLOCKCHAIN_ENABLED=true. This
+             * happens after the document + hash are already safely
+             * stored in MySQL, so a blockchain failure here can
+             * never lose the document or its SHA-256 fingerprint —
+             * it only leaves blockchain_status as 'failed' (instead
+             * of 'registered') for later retry.
+             */
+
+            const blockchainResult = await registerDocumentOnBlockchain(
+                documentId,
+                documentHash
             );
 
             return res.status(201).json({
                 success: true,
                 message: "Document uploaded successfully.",
                 file: {
-                    id: result.insertId,
+                    id: documentId,
                     name: fileName,
                     type: fileType
+                },
+                blockchain: {
+                    status: blockchainResult.status
                 }
             });
         } catch (error) {
@@ -469,6 +597,282 @@ router.post(
             return res.status(500).json({
                 success: false,
                 message: "File upload failed."
+            });
+        }
+    }
+);
+
+/* =========================================================
+   REGISTER (OR RETRY) BLOCKCHAIN HASH REGISTRATION (Step 3)
+
+   Smallest possible protected endpoint to (re)attempt anchoring
+   an already-stored document's hash on-chain, for documents
+   uploaded while BLOCKCHAIN_ENABLED was false, or whose earlier
+   attempt failed. Does not touch the document file or its hash —
+   only reads the existing document_hash and updates the
+   blockchain_tx_hash / blockchain_status fields.
+========================================================= */
+
+router.post(
+    "/documents/:id/blockchain/register",
+    authMiddleware,
+    documentPasswordMiddleware,
+    async (req, res) => {
+        try {
+            const documentId = Number(req.params.id);
+
+            if (!Number.isInteger(documentId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid document ID."
+                });
+            }
+
+            const document = await getDocumentForBlockchain(
+                documentId,
+                req.user.id
+            );
+
+            if (!document) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Document not found."
+                });
+            }
+
+            if (!document.document_hash) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Document has no stored hash to register."
+                });
+            }
+
+            if (document.blockchain_status === "registered") {
+                return res.status(200).json({
+                    success: true,
+                    message: "Document is already registered on-chain.",
+                    blockchain: {
+                        status: document.blockchain_status
+                    }
+                });
+            }
+
+            if (!isBlockchainEnabled()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Blockchain integration is currently disabled."
+                });
+            }
+
+            const blockchainResult = await registerDocumentOnBlockchain(
+                documentId,
+                document.document_hash
+            );
+
+            if (blockchainResult.status !== "registered") {
+                return res.status(502).json({
+                    success: false,
+                    message: "Blockchain registration failed. Please try again later.",
+                    blockchain: {
+                        status: blockchainResult.status
+                    }
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                message: "Document hash registered on blockchain.",
+                blockchain: {
+                    status: blockchainResult.status
+                }
+            });
+        } catch (error) {
+            console.error(
+                "BLOCKCHAIN REGISTER ENDPOINT ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message: "Failed to register document on blockchain."
+            });
+        }
+    }
+);
+
+/* =========================================================
+   VERIFY BLOCKCHAIN DOCUMENT INTEGRITY (Step 4)
+
+   READ-ONLY endpoint. Recomputes the SHA-256 hash of the
+   document's CURRENT file on disk (never trusts the value
+   already stored in MySQL) and compares it against the hash
+   that was actually anchored on-chain in the transaction
+   recorded at registration time (Step 3). This is what lets
+   the system detect a document that was swapped/modified on
+   disk after it was registered.
+
+   This endpoint never creates a transaction, never calls
+   anchorHashOnChain(), and never writes to the documents
+   table — it only reads.
+========================================================= */
+
+router.post(
+    "/documents/:id/blockchain/verify",
+    authMiddleware,
+    documentPasswordMiddleware,
+    async (req, res) => {
+        try {
+            const documentId = Number(req.params.id);
+
+            if (!Number.isInteger(documentId)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid document ID."
+                });
+            }
+
+            /*
+             * Ownership-aware fetch: only ever returns a row when
+             * this document belongs to req.user.id, exactly like
+             * the existing /blockchain/register route. A caller
+             * cannot verify another user's document by changing
+             * the :id — they simply get 404, the same response
+             * they'd get for a non-existent document id.
+             */
+
+            const document = await getDocumentForBlockchain(
+                documentId,
+                req.user.id
+            );
+
+            if (!document) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Document not found."
+                });
+            }
+
+            /*
+             * No confirmed on-chain registration to check against.
+             */
+
+            if (
+                document.blockchain_status !== "registered" ||
+                !document.blockchain_tx_hash
+            ) {
+                return res.status(200).json({
+                    success: true,
+                    status: "not_registered"
+                });
+            }
+
+            const physicalPath = getPhysicalFilePath(
+                document.file_path
+            );
+
+            if (!physicalPath || !fs.existsSync(physicalPath)) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Document file is no longer available."
+                });
+            }
+
+            /*
+             * Fresh hash of the CURRENT file bytes on disk — never
+             * copied from the document_hash column in MySQL. This
+             * is the only way a post-registration tamper (a file
+             * swapped on disk) can be detected.
+             */
+
+            let currentHash;
+
+            try {
+                const fileBuffer = await fs.promises.readFile(
+                    physicalPath
+                );
+
+                currentHash = hashDocument(fileBuffer);
+            } catch (readError) {
+                console.error(
+                    "BLOCKCHAIN VERIFY FILE READ ERROR:",
+                    readError
+                );
+
+                return res.status(500).json({
+                    success: false,
+                    message:
+                        "Failed to read document for verification."
+                });
+            }
+
+            /*
+             * Read the hash back from the actual on-chain
+             * transaction. Any RPC/network/config problem here is
+             * caught and reported as 'blockchain_unavailable' —
+             * never as an internal error, and never with the
+             * underlying error message/stack.
+             */
+
+            let onChainResult;
+
+            try {
+                onChainResult = await verifyHashOnChain(
+                    document.blockchain_tx_hash
+                );
+            } catch (blockchainError) {
+                console.error(
+                    "BLOCKCHAIN VERIFY ON-CHAIN ERROR:",
+                    blockchainError.message
+                );
+
+                return res.status(200).json({
+                    success: true,
+                    status: "blockchain_unavailable"
+                });
+            }
+
+            if (
+                !onChainResult ||
+                !onChainResult.found ||
+                !onChainResult.documentHash
+            ) {
+                return res.status(200).json({
+                    success: true,
+                    status: "blockchain_unavailable"
+                });
+            }
+
+            const onChainHash = String(
+                onChainResult.documentHash
+            ).toLowerCase();
+
+            const matches =
+                currentHash.toLowerCase() === onChainHash;
+
+            if (matches) {
+                return res.status(200).json({
+                    success: true,
+                    status: "verified",
+                    verified: true
+                });
+            }
+
+            return res.status(200).json({
+                success: true,
+                status: "tampered",
+                verified: false
+            });
+        } catch (error) {
+            console.error(
+                "BLOCKCHAIN VERIFY ENDPOINT ERROR:",
+                error
+            );
+
+            return res.status(500).json({
+                success: false,
+                message:
+                    "Failed to verify document on blockchain."
             });
         }
     }

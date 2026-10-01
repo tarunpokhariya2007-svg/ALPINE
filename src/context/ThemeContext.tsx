@@ -1,19 +1,16 @@
 import {
   createContext,
   useContext,
-  useState,
   useEffect,
   type ReactNode,
 } from 'react'
 
-type Theme = 'light' | 'dark'
+type Theme = 'dark'
 
 const ThemeContext = createContext<{
   theme: Theme
-  toggle: () => void
 }>({
-  theme: 'light',
-  toggle: () => {},
+  theme: 'dark',
 })
 
 export function ThemeProvider({
@@ -21,49 +18,18 @@ export function ThemeProvider({
 }: {
   children: ReactNode
 }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window !== 'undefined') {
-      const savedTheme =
-        localStorage.getItem('nyaya-theme')
-
-      // Use saved preference if available
-      if (
-        savedTheme === 'light' ||
-        savedTheme === 'dark'
-      ) {
-        return savedTheme
-      }
-    }
-
-    // Default Nyaya AI theme
-    return 'light'
-  })
-
   useEffect(() => {
-    document.documentElement.classList.toggle(
-      'dark',
-      theme === 'dark'
-    )
+    // Nyaya AI uses a permanent dark theme.
+    document.documentElement.classList.add('dark')
 
-    localStorage.setItem(
-      'nyaya-theme',
-      theme
-    )
-  }, [theme])
-
-  const toggle = () => {
-    setTheme(current =>
-      current === 'light'
-        ? 'dark'
-        : 'light'
-    )
-  }
+    // Remove any old light-theme preference from previous versions.
+    localStorage.removeItem('nyaya-theme')
+  }, [])
 
   return (
     <ThemeContext.Provider
       value={{
-        theme,
-        toggle,
+        theme: 'dark',
       }}
     >
       {children}

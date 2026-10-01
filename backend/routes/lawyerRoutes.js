@@ -7,33 +7,55 @@ const router = express.Router();
 // =====================================================
 // GET ALL REGISTERED ADVOCATES
 // GET /api/lawyers
+//
+// Returns the real advocate profile by joining:
+// users -> lawyers
 // =====================================================
 router.get("/", async (req, res) => {
   try {
     const [rows] = await db.query(`
       SELECT
-        id,
-        full_name,
-        email,
-        phone,
-        role,
-        created_at
-      FROM users
-      WHERE role = 'lawyer'
-      ORDER BY created_at DESC
+        u.id,
+        u.full_name,
+        u.email,
+        u.phone,
+        u.role,
+        u.created_at,
+
+        l.specialization,
+        l.experience,
+        l.location,
+        l.bio,
+        l.verified,
+        l.high_court,
+        l.enrollment_year
+
+      FROM users u
+
+      LEFT JOIN lawyers l
+        ON l.user_id = u.id
+
+      WHERE u.role = 'lawyer'
+
+      ORDER BY u.created_at DESC
     `);
 
     return res.json({
       success: true,
       lawyers: rows,
     });
+
   } catch (err) {
+
     console.error("GET LAWYERS ERROR:", err);
 
     return res.status(500).json({
       success: false,
-      message: err.message || "Failed to load advocates",
+      message:
+        err.message ||
+        "Failed to load advocates",
     });
+
   }
 });
 

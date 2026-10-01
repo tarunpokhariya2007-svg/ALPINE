@@ -3,7 +3,6 @@ const caseAnalyzer = require("./caseAnalyzer");
 const lawResearchAgent = require("./lawResearchAgent");
 const lawyerRecommendationAgent = require("./lawyerRecommendationAgent");
 const reportGeneratorAgent = require("./reportGeneratorAgent");
-const { saveCase } = require("../database/caseModel");
 
 console.log("MASTER AGENT USING GROQ");
 
@@ -165,22 +164,9 @@ IMPORTANT:
                     : answer?.message
                         ? String(answer.message)
                         : "I could not generate a legal response.";
-
-        // ==============================
-        // SAVE CASE
-        // ==============================
-
-        console.log("Saving case...");
-
-        await saveCase(
-            data.userId,
-            data.case,
-            data.case,
-            lawyerRecommendation?.specialization || "General Lawyer",
-            "Medium"
-        );
-
-        console.log("CASE SAVED SUCCESSFULLY");
+        // AI analysis does NOT create a case.
+        // Cases are created explicitly by the user through
+        // POST /api/cases (New Case page).
 
         // ==============================
         // RETURN FINAL RESULT

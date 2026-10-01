@@ -386,6 +386,255 @@ router.get(
   }
 );
 
+
+/*
+=========================================================
+CLOSE CASE
+PATCH /api/cases/:id/close
+=========================================================
+*/
+
+router.patch(
+  "/:id/close",
+  authMiddleware,
+  async (req, res) => {
+    try {
+      const userId = getUserId(req);
+      const caseId = Number(req.params.id);
+
+      if (!userId) {
+        return res.status(401).json({
+          success: false,
+          message: "Invalid user authentication",
+        });
+      }
+
+      if (
+        !Number.isInteger(caseId) ||
+        caseId <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid case ID",
+        });
+      }
+
+      const [result] = await db.query(
+        `
+        UPDATE cases
+        SET status = 'closed',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+        AND user_id = ?
+        `,
+        [caseId, userId]
+      );
+
+      if (result.affectedRows === 0) {
+        return res.status(404).json({
+          success: false,
+          message: "Case not found",
+        });
+      }
+
+      const [rows] = await db.query(
+        `
+        SELECT
+          id,
+          user_id,
+          title,
+          description,
+          category,
+          severity,
+          status,
+          created_at,
+          updated_at
+        FROM cases
+        WHERE id = ?
+        AND user_id = ?
+        LIMIT 1
+        `,
+        [caseId, userId]
+      );
+
+      return res.status(200).json({
+        success: true,
+        message: "Case closed successfully",
+        case: rows[0] || null,
+      });
+    } catch (error) {
+      console.error("CLOSE CASE ERROR:", error);
+
+      return res.status(500).json({
+        success: false,
+        message: error.message || "Failed to close case",
+      });
+    }
+  }
+);
+
+
+/*
+=========================================================
+CASE NOTES
+GET  /api/cases/:id/notes
+PUT  /api/cases/:id/notes
+=========================================================
+*/
+
+async function ensureCaseNotesTable() {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS case_notes (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      case_id INT NOT NULL,
+      user_id INT NOT NULL,
+      note_text TEXT NOT NULL,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_case_notes_case_user (case_id, user_id),
+      INDEX idx_case_notes_user (user_id),
+      INDEX idx_case_notes_case (case_id)
+    )
+  `);
+}
+
+router.get("/:id/notes", authMiddleware, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const caseId = Number(req.params.id);
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user authentication",
+      });
+    }
+
+    if (!Number.isInteger(caseId) || caseId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid case ID",
+      });
+    }
+
+    await ensureCaseNotesTable();
+
+    const [caseRows] = await db.query(
+      `SELECT id FROM cases WHERE id = ? AND user_id = ? LIMIT 1`,
+      [caseId, userId]
+    );
+
+    if (caseRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Case not found",
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT id, case_id, note_text, created_at, updated_at
+      FROM case_notes
+      WHERE case_id = ? AND user_id = ?
+      LIMIT 1
+      `,
+      [caseId, userId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      note: rows[0] || null,
+    });
+  } catch (error) {
+    console.error("GET CASE NOTES ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to load notes",
+    });
+  }
+});
+
+router.put("/:id/notes", authMiddleware, async (req, res) => {
+  try {
+    const userId = getUserId(req);
+    const caseId = Number(req.params.id);
+    const noteText =
+      typeof req.body?.note_text === "string"
+        ? req.body.note_text
+        : "";
+
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user authentication",
+      });
+    }
+
+    if (!Number.isInteger(caseId) || caseId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid case ID",
+      });
+    }
+
+    if (noteText.length > 20000) {
+      return res.status(400).json({
+        success: false,
+        message: "Notes are limited to 20,000 characters",
+      });
+    }
+
+    await ensureCaseNotesTable();
+
+    const [caseRows] = await db.query(
+      `SELECT id FROM cases WHERE id = ? AND user_id = ? LIMIT 1`,
+      [caseId, userId]
+    );
+
+    if (caseRows.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "Case not found",
+      });
+    }
+
+    await db.query(
+      `
+      INSERT INTO case_notes (case_id, user_id, note_text)
+      VALUES (?, ?, ?)
+      ON DUPLICATE KEY UPDATE
+        note_text = VALUES(note_text),
+        updated_at = CURRENT_TIMESTAMP
+      `,
+      [caseId, userId, noteText]
+    );
+
+    const [rows] = await db.query(
+      `
+      SELECT id, case_id, note_text, created_at, updated_at
+      FROM case_notes
+      WHERE case_id = ? AND user_id = ?
+      LIMIT 1
+      `,
+      [caseId, userId]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Notes saved successfully",
+      note: rows[0] || null,
+    });
+  } catch (error) {
+    console.error("SAVE CASE NOTES ERROR:", error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Failed to save notes",
+    });
+  }
+});
+
+
 /*
 =========================================================
 DELETE CASE
